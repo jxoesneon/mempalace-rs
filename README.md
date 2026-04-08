@@ -8,7 +8,7 @@
 [![Crates.io](https://img.shields.io/crates/v/mempalace-rs.svg)](https://crates.io/crates/mempalace-rs)
 [![Docs.rs](https://docs.rs/mempalace-rs/badge.svg)](https://docs.rs/mempalace-rs)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-2021-edition-orange.svg)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-edition-field)
+[![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-edition-field)
 
 A high-performance, local, offline-first AI memory system built in Rust. Gives AI agents long-term retention by mining local codebases and conversations into a structured, searchable, and symbolic "palace."
 
