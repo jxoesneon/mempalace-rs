@@ -94,12 +94,12 @@ _Raw throughput measured on local hardware._
 
 <!-- BENCH_TABLE_START -->
 
-| Operation         | Throughput       | Latency |
-| ----------------- | ---------------- | ------- |
-| AAAK Compression  | ~1793 ops/sec    | 557 µs  |
-| Entity Detection  | ~257567 ops/sec  | 4 µs    |
-| Token Counting    | ~3575680 ops/sec | 280 ns  |
-| Compression Stats | ~1266871 ops/sec | 789 ns  |
+| Operation          | Throughput        | Latency |
+|--------------------|-------------------|---------|
+| AAAK Compression   | ~1803 ops/sec     | 555 µs  |
+| Entity Detection   | ~254024 ops/sec   | 4 µs    |
+| Token Counting     | ~3627240 ops/sec  | 276 ns  |
+| Compression Stats  | ~1160329 ops/sec  | 862 ns  |
 
 <!-- BENCH_TABLE_END -->
 
