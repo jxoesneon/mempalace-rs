@@ -19,3 +19,4 @@ GEMINI.md
 .worktrees/
 bench_final.txt
 examples/measure_improvements.rs
+HANDOFF.md
