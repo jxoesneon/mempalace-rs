@@ -1,0 +1,201 @@
+
+running 144 tests
+test convo_miner::tests::test_chunk_by_exchange_with_separator ... ignored
+test convo_miner::tests::test_chunk_by_paragraph_single_long_text ... ignored
+test convo_miner::tests::test_chunk_exchanges_by_exchange ... ignored
+test convo_miner::tests::test_chunk_exchanges_by_paragraph ... ignored
+test convo_miner::tests::test_chunk_exchanges_empty_ai ... ignored
+test convo_miner::tests::test_detect_convo_room ... ignored
+test convo_miner::tests::test_detect_convo_room_tie ... ignored
+test convo_miner::tests::test_get_mineable_convo_files ... ignored
+test convo_miner::tests::test_mine_convos_error ... ignored
+test convo_miner::tests::test_mine_convos_main_logic ... ignored
+test convo_miner::tests::test_prepare_convo_documents ... ignored
+test convo_miner::tests::test_process_convo_file ... ignored
+test convo_miner::tests::test_process_convo_file_empty ... ignored
+test diary::tests::test_diary_create_and_read ... ignored
+test diary::tests::test_diary_delete ... ignored
+test diary::tests::test_diary_last_n_limit ... ignored
+test diary::tests::test_diary_public_functions ... ignored
+test diary::tests::test_diary_stats ... ignored
+test diary::tests::test_diary_timestamp ... ignored
+test entity_detector::tests::test_code_file_reference ... ignored
+test entity_detector::tests::test_direct_address ... ignored
+test entity_detector::tests::test_filter_code ... ignored
+test entity_detector::tests::test_frequency_filter ... ignored
+test entity_detector::tests::test_mixed_signals ... ignored
+test entity_detector::tests::test_multi_word_phrase ... ignored
+test entity_detector::tests::test_person_signals ... ignored
+test entity_detector::tests::test_project_signals ... ignored
+test entity_detector::tests::test_term_signals ... ignored
+test entity_detector::tests::test_versioned_project ... ignored
+test entity_detector::tests::test_weak_signals ... ignored
+test entity_registry::tests::test_alias_resolution ... ignored
+test entity_registry::tests::test_disambiguation ... ignored
+test entity_registry::tests::test_registration_and_persistence ... ignored
+test extractor::tests::test_confidence_threshold_and_bonus ... ignored
+test extractor::tests::test_disambiguate_problem_to_emotional ... ignored
+test extractor::tests::test_disambiguate_problem_to_milestone ... ignored
+test extractor::tests::test_extract_decision ... ignored
+test extractor::tests::test_extract_emotional ... ignored
+test extractor::tests::test_extract_milestone ... ignored
+test extractor::tests::test_extract_preference ... ignored
+test extractor::tests::test_extract_problem ... ignored
+test extractor::tests::test_extract_prose_with_code ... ignored
+test extractor::tests::test_extract_topic_with_boosts ... ignored
+test extractor::tests::test_sentiment_score ... ignored
+test extractor::tests::test_split_by_groups ... ignored
+test extractor::tests::test_split_by_turns ... ignored
+test mcp_server::tests::test_mcp_initialize ... ignored
+test mcp_server::tests::test_mcp_tool_diary_ops ... ignored
+test mcp_server::tests::test_mcp_tool_get_aaak_spec ... ignored
+test mcp_server::tests::test_mcp_tool_get_taxonomy ... ignored
+test mcp_server::tests::test_mcp_tool_graph_stats ... ignored
+test mcp_server::tests::test_mcp_tool_list_rooms ... ignored
+test mcp_server::tests::test_mcp_tool_list_wings ... ignored
+test mcp_server::tests::test_mcp_tools_list ... ignored
+test miner::tests::test_chunk_text ... ignored
+test miner::tests::test_chunk_text_empty ... ignored
+test miner::tests::test_chunk_text_exact_min ... ignored
+test miner::tests::test_chunk_text_long_with_breaks ... ignored
+test miner::tests::test_chunk_text_newline_break ... ignored
+test miner::tests::test_chunk_text_short ... ignored
+test miner::tests::test_detect_room ... ignored
+test miner::tests::test_detect_room_keyword_scoring ... ignored
+test miner::tests::test_get_mineable_files ... ignored
+test miner::tests::test_get_mineable_files_nested ... ignored
+test miner::tests::test_get_mineable_files_with_skips ... ignored
+test miner::tests::test_hash_string ... ignored
+test miner::tests::test_mine_project_invalid_dir ... ignored
+test miner::tests::test_mine_project_storage_error ... ignored
+test miner::tests::test_mine_project_with_file ... ignored
+test miner::tests::test_prepare_documents ... ignored
+test miner::tests::test_process_project_file ... ignored
+test miner::tests::test_process_project_file_empty ... ignored
+test models::tests::test_drawer_metadata ... ignored
+test models::tests::test_model_serialization ... ignored
+test models::tests::test_room_creation ... ignored
+test models::tests::test_wing_creation ... ignored
+test normalize::tests::test_extract_content_complex ... ignored
+test normalize::tests::test_messages_to_transcript_adjacent ... ignored
+test normalize::tests::test_normalize_chatgpt ... ignored
+test normalize::tests::test_normalize_chatgpt_fallback ... ignored
+test normalize::tests::test_normalize_claude_ai ... ignored
+test normalize::tests::test_normalize_claude_ai_chat_messages ... ignored
+test normalize::tests::test_normalize_claude_code ... ignored
+test normalize::tests::test_normalize_empty ... ignored
+test normalize::tests::test_normalize_existing_transcript ... ignored
+test normalize::tests::test_normalize_invalid_json ... ignored
+test normalize::tests::test_normalize_passthrough ... ignored
+test normalize::tests::test_normalize_plain_text ... ignored
+test normalize::tests::test_normalize_slack ... ignored
+test normalize::tests::test_normalize_slack_multiple_users ... ignored
+test onboarding::tests::test_aaak_code_generation ... ignored
+test onboarding::tests::test_bootstrap_files ... ignored
+test palace_graph::tests::test_fuzzy_lookup ... ignored
+test palace_graph::tests::test_graph_traversal ... ignored
+test palace_graph::tests::test_tunnel_detection ... ignored
+test searcher::tests::test_build_where_clause_empty ... ignored
+test searcher::tests::test_build_where_clause_room_only ... ignored
+test searcher::tests::test_build_where_clause_wing_and_room ... ignored
+test searcher::tests::test_build_where_clause_wing_only ... ignored
+test searcher::tests::test_format_json_results_empty ... ignored
+test searcher::tests::test_format_json_results_empty_pure ... ignored
+test searcher::tests::test_format_json_results_missing_metadata ... ignored
+test searcher::tests::test_format_json_results_with_data ... ignored
+test searcher::tests::test_format_search_results_empty ... ignored
+test searcher::tests::test_format_search_results_empty_pure ... ignored
+test searcher::tests::test_format_search_results_missing_metadata ... ignored
+test searcher::tests::test_format_search_results_multiline_doc ... ignored
+test searcher::tests::test_format_search_results_with_data ... ignored
+test searcher::tests::test_search_graceful_when_unavailable ... ignored
+test searcher::tests::test_searcher_new ... ignored
+test spellcheck::tests::test_known_names_preservation ... ignored
+test spellcheck::tests::test_should_skip ... ignored
+test spellcheck::tests::test_spellcheck_simple_typo ... ignored
+test spellcheck::tests::test_spellcheck_transcript ... ignored
+test split_mega_files::tests::test_extract_people ... ignored
+test split_mega_files::tests::test_extract_people_username_mapping ... ignored
+test split_mega_files::tests::test_extract_subject ... ignored
+test split_mega_files::tests::test_extract_subject_edge_cases ... ignored
+test split_mega_files::tests::test_extract_timestamp ... ignored
+test split_mega_files::tests::test_extract_timestamp_unknown_month ... ignored
+test split_mega_files::tests::test_is_true_session_start ... ignored
+test split_mega_files::tests::test_split_mega_file_not_mega ... ignored
+test split_mega_files::tests::test_split_mega_file_small_chunk ... ignored
+test storage::tests::test_layer0_format_render ... ignored
+test storage::tests::test_layer0_new_and_render ... ignored
+test storage::tests::test_layer1_build_where_clause ... ignored
+test storage::tests::test_layer1_build_where_clause_both ... ignored
+test storage::tests::test_layer1_format_generation_empty ... ignored
+test storage::tests::test_layer1_format_generation_single ... ignored
+test storage::tests::test_layer1_format_generation_too_long ... ignored
+test storage::tests::test_layer1_format_generation_weights ... ignored
+test storage::tests::test_layer1_format_generation_with_data ... ignored
+test storage::tests::test_layer2_format_retrieval ... ignored
+test storage::tests::test_layer2_format_retrieval_empty ... ignored
+test storage::tests::test_layer3_format_search ... ignored
+test storage::tests::test_layer_async_failures ... ignored
+test storage::tests::test_layer_new_methods ... ignored
+test storage::tests::test_memory_stack_async_methods ... ignored
+test storage::tests::test_memory_stack_format_wake_up ... ignored
+test storage::tests::test_memory_stack_new ... ignored
+test storage::tests::test_storage_add_wing_convo ... ignored
+test storage::tests::test_storage_add_wing_duplicate ... ignored
+test storage::tests::test_storage_new_and_add_wing ... ignored
+test storage::tests::test_storage_new_memory ... ignored
+
+test result: ok. 0 passed; 0 failed; 144 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 7 tests
+test tests::test_main_compress ... ignored
+test tests::test_main_init ... ignored
+test tests::test_main_mine ... ignored
+test tests::test_main_search ... ignored
+test tests::test_main_split ... ignored
+test tests::test_main_status ... ignored
+test tests::test_main_wakeup ... ignored
+
+test result: ok. 0 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+aaak_compression        time:   [25.398 µs 25.452 µs 25.520 µs]
+                        change: [-0.4975% +0.0822% +0.7491%] (p = 0.84 > 0.05)
+                        No change in performance detected.
+Found 9 outliers among 100 measurements (9.00%)
+  4 (4.00%) low mild
+  1 (1.00%) high mild
+  4 (4.00%) high severe
+
+entity_detection        time:   [1.8245 µs 1.8278 µs 1.8311 µs]
+                        change: [-5.1728% -4.4253% -3.7309%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 7 outliers among 100 measurements (7.00%)
+  2 (2.00%) low mild
+  4 (4.00%) high mild
+  1 (1.00%) high severe
+
+token_counting          time:   [133.30 ns 133.82 ns 134.41 ns]
+                        change: [-4.3258% -2.8104% -1.6795%] (p = 0.00 < 0.05)
+                        Performance has improved.
+Found 5 outliers among 100 measurements (5.00%)
+  4 (4.00%) high mild
+  1 (1.00%) high severe
+
+compression_stats       time:   [369.87 ns 373.20 ns 377.12 ns]
+                        change: [-0.7957% -0.0609% +0.7287%] (p = 0.88 > 0.05)
+                        No change in performance detected.
+Found 7 outliers among 100 measurements (7.00%)
+  2 (2.00%) high mild
+  5 (5.00%) high severe
+

@@ -60,7 +60,9 @@ impl McpServer {
                 .unwrap_or("knowledge.db"),
         )?;
         let pg = PalaceGraph::new();
-        let dialect = Dialect::default();
+        // Phase 4: load external emotion map and inject into dialect
+        let custom_emotions = config.load_emotions_map();
+        let dialect = Dialect::with_custom_emotions(None, None, custom_emotions);
 
         Ok(Self {
             config,
@@ -469,11 +471,24 @@ impl McpServer {
 
     pub(crate) async fn tool_get_aaak_spec(&self) -> Result<Value> {
         Ok(json!({
-            "spec": "AAAK Dialect 3.1-pro",
+            "spec": "AAAK Dialect V:3.2",
+            "version": crate::dialect::AAAK_VERSION,
             "compression_ratio": "~30x",
             "layers": ["L0: IDENTITY", "L1: ESSENTIAL", "L2: ON-DEMAND", "L3: SEARCH"],
-            "format": "WING|ROOM|DATE|SOURCE\n0:ENTITIES|TOPICS|\"QUOTE\"|EMOTIONS|FLAGS",
-            "entity_codes": self.dialect.entity_codes.len()
+            "format": "V:3.2\nWING|ROOM|DATE|SOURCE\n0:ENTITIES|TOPICS|\"QUOTE\"|EMOTIONS|FLAGS\nJSON:{overlay}",
+            "proposition_format": "V:3.2\nWING|ROOM|DATE|SOURCE\nP0:ENTITIES|TOPICS|EMOTIONS|FLAGS\nP1:ENTITIES|TOPICS",
+            "density_range": "1 (compact) – 10 (verbose), default 5",
+            "features": [
+                "versioning (V:3.2)",
+                "adaptive density",
+                "metadata overlay (JSON:)",
+                "external emotion dictionary (emotions.json)",
+                "proposition atomisation (compress_propositions)",
+                "faithfulness scoring",
+                "delta encoding"
+            ],
+            "entity_codes": self.dialect.entity_codes.len(),
+            "custom_emotions": self.dialect.custom_emotions.len()
         }))
     }
 

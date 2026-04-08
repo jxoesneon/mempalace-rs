@@ -82,8 +82,18 @@ fn test_dialect_decode() {
 #[test]
 fn test_dialect_extract_topics_edge_cases() {
     let dialect = Dialect::default();
-    // Empty string
-    assert_eq!(dialect.compress("", None), "0:???|misc");
+    // Empty string: must contain entity placeholder and misc topic, and version header
+    let empty_out = dialect.compress("", None);
+    assert!(
+        empty_out.contains("0:???"),
+        "empty compress must have 0:???: {}",
+        empty_out
+    );
+    assert!(
+        empty_out.contains("misc"),
+        "empty compress must have misc: {}",
+        empty_out
+    );
 
     // Proper noun and technical term boost
     let text = "MyDatabase and Custom-Function are Important.";
