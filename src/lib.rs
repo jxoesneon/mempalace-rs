@@ -4,6 +4,7 @@
 //! It enables users to give their AI "memory" by mining local projects and
 //! conversations into a structured palace and knowledge graph.
 
+pub mod benchmark;
 pub mod config;
 pub mod convo_miner;
 pub mod dialect;

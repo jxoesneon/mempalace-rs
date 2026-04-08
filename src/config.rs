@@ -122,6 +122,11 @@ pub struct MempalaceConfig {
     pub topic_wings: Vec<String>,
     pub hall_keywords: HashMap<String, Vec<String>>,
     pub people_map: HashMap<String, String>,
+    /// Phase 4: optional path to an external emotions.json file.
+    /// Format: `{"joy": "joy", "custom_emotion": "cst", ...}`
+    /// When present, entries are merged on top of the built-in emotion codes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emotions_path: Option<PathBuf>,
 }
 
 impl Default for MempalaceConfig {
@@ -136,6 +141,7 @@ impl Default for MempalaceConfig {
             topic_wings: default_topic_wings(),
             hall_keywords: default_hall_keywords(),
             people_map: HashMap::new(),
+            emotions_path: None,
         };
 
         config.load_from_file();
@@ -156,6 +162,7 @@ impl MempalaceConfig {
             topic_wings: default_topic_wings(),
             hall_keywords: default_hall_keywords(),
             people_map: HashMap::new(),
+            emotions_path: None,
         };
 
         config.load_from_file();
@@ -215,6 +222,31 @@ impl MempalaceConfig {
             std::env::var("MEMPALACE_PALACE_PATH").or_else(|_| std::env::var("MEMPAL_PALACE_PATH"))
         {
             self.palace_path = val;
+        }
+        // Phase 4: allow overriding emotions file path via env var
+        if let Ok(val) = std::env::var("MEMPALACE_EMOTIONS_PATH") {
+            self.emotions_path = Some(PathBuf::from(val));
+        }
+    }
+
+    /// Phase 4: load external emotion name→code mappings from `emotions.json`.
+    /// Returns an empty map if the file is absent or malformed (graceful degradation).
+    pub fn load_emotions_map(&self) -> HashMap<String, String> {
+        // Prefer explicitly set path, then default location
+        let path = self
+            .emotions_path
+            .clone()
+            .unwrap_or_else(|| self.config_dir.join("emotions.json"));
+
+        if !path.exists() {
+            return HashMap::new();
+        }
+
+        match fs::read_to_string(&path) {
+            Ok(content) => {
+                serde_json::from_str::<HashMap<String, String>>(&content).unwrap_or_default()
+            }
+            Err(_) => HashMap::new(),
         }
     }
 

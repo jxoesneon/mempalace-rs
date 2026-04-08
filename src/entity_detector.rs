@@ -304,15 +304,28 @@ fn score_entity(name: &str, text: &str, lines: &[&str]) -> EntityScores {
     scores
 }
 
+/// Generates a simple, stable 5-character hex hash for an entity name to enable semantic shadowing.
+fn generate_entity_id(name: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    name.to_lowercase().hash(&mut hasher);
+    let hash_val = hasher.finish();
+    format!("{:x}", hash_val).chars().take(5).collect()
+}
+
 fn classify_entity(name: &str, frequency: usize, scores: EntityScores) -> DetectedEntity {
     let ps = scores.person_score;
     let prs = scores.project_score;
     let total = ps + prs;
 
+    let unique_id = Some(generate_entity_id(name));
+
     if total == 0.0 {
         let confidence = (frequency as f32 / 50.0).min(0.4);
         return DetectedEntity {
             name: name.to_string(),
+            unique_id,
             r#type: EntityType::Term,
             confidence: (confidence * 100.0).round() / 100.0,
             signals: vec![format!("appears {}x, no strong type signals", frequency)],
@@ -343,6 +356,7 @@ fn classify_entity(name: &str, frequency: usize, scores: EntityScores) -> Detect
         let confidence = 0.5 + person_ratio * 0.5;
         DetectedEntity {
             name: name.to_string(),
+            unique_id,
             r#type: EntityType::Person,
             confidence: (confidence.min(0.99) * 100.0).round() / 100.0,
             signals: scores.person_signals.into_iter().take(3).collect(),
@@ -352,6 +366,7 @@ fn classify_entity(name: &str, frequency: usize, scores: EntityScores) -> Detect
     } else if person_ratio >= 0.7 && (!has_two_signal_types || ps < 5.0) {
         DetectedEntity {
             name: name.to_string(),
+            unique_id,
             r#type: EntityType::Term,
             confidence: 0.4,
             signals: vec![format!("appears {}x — weak signals", frequency)],
@@ -362,6 +377,7 @@ fn classify_entity(name: &str, frequency: usize, scores: EntityScores) -> Detect
         let confidence = 0.5 + (1.0 - person_ratio) * 0.5;
         DetectedEntity {
             name: name.to_string(),
+            unique_id,
             r#type: EntityType::Project,
             confidence: (confidence.min(0.99) * 100.0).round() / 100.0,
             signals: scores.project_signals.into_iter().take(3).collect(),
@@ -371,6 +387,7 @@ fn classify_entity(name: &str, frequency: usize, scores: EntityScores) -> Detect
     } else {
         DetectedEntity {
             name: name.to_string(),
+            unique_id,
             r#type: EntityType::Term,
             confidence: 0.5,
             signals: vec!["mixed signals — needs review".to_string()],

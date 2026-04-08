@@ -1,7 +1,7 @@
 use crate::config::MempalaceConfig;
 use crate::models::Wing;
 use crate::vector_storage::VectorStorage;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use rusqlite::{params, Connection, Result as SqlResult};
 use std::collections::HashMap;
 use std::fs;
@@ -23,6 +23,13 @@ pub struct Storage {
 pub struct Layer0 {
     pub path: PathBuf,
     pub text: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PruneReport {
+    pub clusters_found: usize,
+    pub merged: usize,
+    pub tokens_saved_est: usize,
 }
 
 impl Layer0 {
@@ -150,7 +157,7 @@ impl Layer1 {
             total_len += room_line.len();
 
             if let Some(entries) = by_room.get(room) {
-                for (_, meta, doc) in entries {
+                for (imp, meta, doc) in entries {
                     let source = meta
                         .as_ref()
                         .and_then(|m| m.get("source_file"))
@@ -167,7 +174,9 @@ impl Layer1 {
                         snippet = format!("{}...", &snippet[..197]);
                     }
 
-                    let mut entry_line = format!("  - {}", snippet);
+                    // Map importance (e.g. 5.0) to 0-9 weight
+                    let weight = (imp * 2.0).round().min(9.0) as u8;
+                    let mut entry_line = format!("  - WT:{}| {}", weight, snippet);
                     if !source_name.is_empty() {
                         entry_line = format!("{}  ({})", entry_line, source_name);
                     }
@@ -198,11 +207,24 @@ impl Layer1 {
         if records.is_empty() {
             return "## L1 — No memories yet.".to_string();
         }
+
+        // Call touch_memory for each retrieved record to update access patterns
+        for r in &records {
+            let _ = vs.touch_memory(r.id);
+        }
+
         let docs: Vec<String> = records.iter().map(|r| r.text_content.clone()).collect();
         let metas: Vec<Option<serde_json::Map<String, serde_json::Value>>> = records
             .iter()
             .map(|r| {
                 let mut m = serde_json::Map::new();
+                m.insert(
+                    "importance".to_string(),
+                    serde_json::Value::Number(
+                        serde_json::Number::from_f64(r.importance as f64)
+                            .unwrap_or_else(|| serde_json::Number::from(0)),
+                    ),
+                );
                 m.insert(
                     "wing".to_string(),
                     serde_json::Value::String(r.wing.clone()),
@@ -278,7 +300,15 @@ impl Layer2 {
             if snippet.len() > 300 {
                 snippet = format!("{}...", &snippet[..297]);
             }
-            let mut entry = format!("  [{}] {}", room_name, snippet);
+
+            let importance = meta
+                .as_ref()
+                .and_then(|m| m.get("importance"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(3.0) as f32;
+            let weight = (importance * 2.0).round().min(9.0) as u8;
+
+            let mut entry = format!("  [{}] WT:{}| {}", room_name, weight, snippet);
             if !source_name.is_empty() {
                 entry = format!("{}  ({})", entry, source_name);
             }
@@ -305,6 +335,12 @@ impl Layer2 {
         if records.is_empty() {
             return Self::format_retrieval(wing.as_ref(), room.as_ref(), &[], &[]);
         }
+
+        // Call touch_memory for retrieved records
+        for r in &records {
+            let _ = vs.touch_memory(r.id);
+        }
+
         let docs: Vec<Option<String>> = records
             .iter()
             .map(|r| Some(r.text_content.clone()))
@@ -313,6 +349,13 @@ impl Layer2 {
             .iter()
             .map(|r| {
                 let mut m = serde_json::Map::new();
+                m.insert(
+                    "importance".to_string(),
+                    serde_json::Value::Number(
+                        serde_json::Number::from_f64(r.importance as f64)
+                            .unwrap_or_else(|| serde_json::Number::from(0)),
+                    ),
+                );
                 m.insert(
                     "room".to_string(),
                     serde_json::Value::String(r.room.clone()),
@@ -382,12 +425,20 @@ impl Layer3 {
                 snippet = format!("{}...", &snippet[..297]);
             }
 
+            let importance = meta
+                .as_ref()
+                .and_then(|m| m.get("importance"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(3.0) as f32;
+            let weight = (importance * 2.0).round().min(9.0) as u8;
+
             lines.push(format!(
-                "  [{}] {}/{} (sim={:.3})",
+                "  [{}] {}/{} (sim={:.3}, wt={})",
                 i + 1,
                 wing_name,
                 room_name,
-                similarity
+                similarity,
+                weight
             ));
             lines.push(format!("      {}", snippet));
             if !source_name.is_empty() {
@@ -420,11 +471,24 @@ impl Layer3 {
         if records.is_empty() {
             return Self::format_search(query, &[], &[], &[]);
         }
+
+        // Call touch_memory for retrieved records
+        for r in &records {
+            let _ = vs.touch_memory(r.id);
+        }
+
         let docs: Vec<String> = records.iter().map(|r| r.text_content.clone()).collect();
         let metas: Vec<Option<serde_json::Map<String, serde_json::Value>>> = records
             .iter()
             .map(|r| {
                 let mut m = serde_json::Map::new();
+                m.insert(
+                    "importance".to_string(),
+                    serde_json::Value::Number(
+                        serde_json::Number::from_f64(r.importance as f64)
+                            .unwrap_or_else(|| serde_json::Number::from(0)),
+                    ),
+                );
                 m.insert(
                     "wing".to_string(),
                     serde_json::Value::String(r.wing.clone()),
@@ -589,6 +653,87 @@ impl Storage {
 
         Ok(())
     }
+
+    pub async fn prune_memories(
+        &self,
+        config: &MempalaceConfig,
+        threshold: f32,
+        dry_run: bool,
+        wing: Option<String>,
+    ) -> Result<PruneReport> {
+        let vs = open_vector_storage(config)?;
+        let dialect = crate::dialect::Dialect::default();
+
+        let ids = vs.get_all_ids(wing.as_deref())?;
+        let mut processed = std::collections::HashSet::new();
+        let mut report = PruneReport {
+            clusters_found: 0,
+            merged: 0,
+            tokens_saved_est: 0,
+        };
+
+        for id in ids {
+            if processed.contains(&id) {
+                continue;
+            }
+
+            let record = match vs.get_memory_by_id(id) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+
+            let vec = vs.embed_single(&record.text_content)?;
+            let neighbors = vs
+                .index
+                .search(&vec, 10)
+                .map_err(|e| anyhow!("Search failed: {e}"))?;
+
+            let mut cluster = Vec::new();
+            cluster.push(record.clone());
+            processed.insert(id);
+
+            for i in 0..neighbors.keys.len() {
+                let neighbor_id = neighbors.keys[i] as i64;
+                let distance = neighbors.distances[i];
+
+                if distance < (1.0 - threshold) && !processed.contains(&neighbor_id) {
+                    if let Ok(neighbor_rec) = vs.get_memory_by_id(neighbor_id) {
+                        // Check if it belongs to the same wing (if wing filter is active)
+                        if wing.is_none() || neighbor_rec.wing == *wing.as_ref().unwrap() {
+                            cluster.push(neighbor_rec);
+                            processed.insert(neighbor_id);
+                        }
+                    }
+                }
+            }
+
+            if cluster.len() > 1 {
+                report.clusters_found += 1;
+                report.merged += cluster.len() - 1;
+
+                // Pick winner (highest decayed importance)
+                cluster.sort_by(|a, b| b.importance.partial_cmp(&a.importance).unwrap());
+                let winner = &cluster[0];
+                let losers = &cluster[1..];
+
+                let aaaks: Vec<String> = cluster.iter().map(|c| c.text_content.clone()).collect();
+                let merged_aaak = dialect.merge_aaaks(&aaaks);
+
+                if !dry_run {
+                    vs.update_memory_summary(winner.id, &merged_aaak)?;
+                    for loser in losers {
+                        let _ = vs.delete_memory(loser.id);
+                    }
+                }
+
+                // Estimate tokens saved (rough estimate: characters / 4)
+                let total_chars: usize = losers.iter().map(|l| l.text_content.len()).sum();
+                report.tokens_saved_est += total_chars / 4;
+            }
+        }
+
+        Ok(report)
+    }
 }
 
 #[cfg(test)]
@@ -718,7 +863,7 @@ mod tests {
 
         let res = Layer2::format_retrieval(None, None, &docs, &metas);
         assert!(res.contains("## L2 — ON-DEMAND (3 drawers)"));
-        assert!(res.contains("[hall] Snippet 1"));
+        assert!(res.contains("[hall] WT:6| Snippet 1"));
         assert!(res.contains("file1.txt"));
         assert!(res.contains("[?]")); // None doc
         assert!(res.contains(&"A".repeat(297))); // Truncated long doc
@@ -756,10 +901,10 @@ mod tests {
         let res = Layer3::format_search("test query", &docs, &metas, &dists);
         assert!(res.contains("## L3 — SEARCH RESULTS for \"test query\""));
         assert!(res.contains("[1] w1/r1"));
-        assert!(res.contains("sim=0.8"));
+        assert!(res.contains("sim=0.800, wt=6")); // Default importance 3.0 -> wt 6
         assert!(res.contains("Found result 1"));
         assert!(res.contains("src: f1.txt"));
-        assert!(res.contains("[2] ?/? (sim=0.100)"));
+        assert!(res.contains("[2] ?/? (sim=0.100, wt=6)"));
         assert!(res.contains(&"B".repeat(297)));
     }
 

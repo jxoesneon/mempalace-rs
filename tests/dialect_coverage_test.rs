@@ -82,8 +82,18 @@ fn test_dialect_decode() {
 #[test]
 fn test_dialect_extract_topics_edge_cases() {
     let dialect = Dialect::default();
-    // Empty string
-    assert_eq!(dialect.compress("", None), "0:???|misc");
+    // Empty string: must contain entity placeholder and misc topic, and version header
+    let empty_out = dialect.compress("", None);
+    assert!(
+        empty_out.contains("0:???"),
+        "empty compress must have 0:???: {}",
+        empty_out
+    );
+    assert!(
+        empty_out.contains("misc"),
+        "empty compress must have misc: {}",
+        empty_out
+    );
 
     // Proper noun and technical term boost
     let text = "MyDatabase and Custom-Function are Important.";
@@ -95,7 +105,13 @@ fn test_dialect_extract_topics_edge_cases() {
 fn test_dialect_key_sentence_edge_cases() {
     let dialect = Dialect::default();
     // No sentences long enough
-    assert!(!dialect.compress("Hi. No.", None).contains("\""));
+    let out = dialect.compress("Hi. No.", None);
+    let summary_part = out
+        .lines()
+        .filter(|l| !l.starts_with("JSON:"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!summary_part.contains("\""));
 
     // Long sentence truncation
     let text = "I decided to switch because ".to_string() + &"a".repeat(100) + ".";

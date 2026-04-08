@@ -11,6 +11,7 @@ pub enum EntityType {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct DetectedEntity {
     pub name: String,
+    pub unique_id: Option<String>,
     pub r#type: EntityType,
     pub confidence: f32,
     pub signals: Vec<String>,

@@ -1,15 +1,16 @@
 [package]
 name = "mempalace-rs"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
-description = "A high-performance, local, offline-first AI memory system built in Rust"
+description = "High-performance, local AI memory with AAAK v3.2 protocol and temporal Knowledge Graph"
 license = "MIT"
 repository = "https://github.com/jxoesneon/mempalace-rs"
 homepage = "https://github.com/jxoesneon/mempalace-rs"
-keywords = ["memory", "ai", "mcp", "rag", "knowledge-graph"]
+keywords = ["memory", "ai", "mcp", "rag", "knowledge-graph", "aaak"]
 categories = ["command-line-utilities", "database", "artificial-intelligence"]
 readme = "README.md"
 documentation = "https://docs.rs/mempalace-rs"
+default-run = "mempalace-rs"
 exclude = [
     "models/*",
     ".fastembed_cache/*",
@@ -37,6 +38,7 @@ symspell = "0.3.0"
 reqwest = { version = "0.12", features = ["json"] }
 rayon = "1.10"
 dialoguer = "0.11"
+tempfile = "3.27.0"
 lazy_static = "1.5.0"
 
 # Pure-Rust storage engine dependencies (replaces ChromaDB)
@@ -48,7 +50,6 @@ name = "update-benchmarks"
 path = "scripts/update_benchmarks.rs"
 
 [dev-dependencies]
-tempfile = "3.27.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]

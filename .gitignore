@@ -16,3 +16,7 @@ GEMINI.md
 # Bundled fastembed models (87MB, fetch via download-model bin)
 /models/
 .fastembed_cache/
+.worktrees/
+bench_final.txt
+examples/measure_improvements.rs
+HANDOFF.md

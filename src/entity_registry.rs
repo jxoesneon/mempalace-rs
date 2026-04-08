@@ -484,6 +484,7 @@ mod tests {
 
         let entity = DetectedEntity {
             name: "Riley".to_string(),
+            unique_id: None,
             r#type: EntityType::Person,
             confidence: 1.0,
             signals: vec!["manual".to_string()],
@@ -512,6 +513,7 @@ mod tests {
 
         let entity = DetectedEntity {
             name: "Maxwell".to_string(),
+            unique_id: None,
             r#type: EntityType::Person,
             confidence: 1.0,
             signals: vec![],
@@ -540,6 +542,7 @@ mod tests {
         // "Grace" is a common word
         let entity = DetectedEntity {
             name: "Grace".to_string(),
+            unique_id: None,
             r#type: EntityType::Person,
             confidence: 1.0,
             signals: vec![],
