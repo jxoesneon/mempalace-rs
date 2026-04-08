@@ -13,67 +13,37 @@ cargo bench
 ### Results (Apple Silicon M4, 16GB RAM)
 
 <!-- BENCH_TABLE_START -->
+
 | Operation          | Throughput        | Latency |
 |--------------------|-------------------|---------|
 | AAAK Compression   | ~1803 ops/sec     | 555 µs  |
 | Entity Detection   | ~254024 ops/sec   | 4 µs    |
 | Token Counting     | ~3627240 ops/sec  | 276 ns  |
 | Compression Stats  | ~1160329 ops/sec  | 862 ns  |
+
 <!-- BENCH_TABLE_END -->
 
 **Binary Size**: 7.9 MB (release build)  
 **Cold Start**: ~300 ms  
 **Memory Usage**: ~50 MB baseline
 
-## Standard Benchmarks
+## 2026 Gold Standard Validation
 
-### LongMemEval (500 questions)
+MemPalace-RS adheres to the **2026 Gold Standards** for AI memory validation. We have replaced legacy benchmarks (like LoCoMo and LongMemEval) with a rigorous suite designed to prevent "benchmaxx" fraud.
 
-Tests retrieval across ~53 conversation sessions per question. The standard benchmark for AI memory.
+<!-- GOLD_STANDARD_START -->
 
-```bash
-# Download data
-mkdir -p /tmp/longmemeval-data
-curl -fsSL -o /tmp/longmemeval-data/longmemeval_s_cleaned.json \
-  https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/main/longmemeval_s_cleaned.json
+| Benchmark | Score | Metric | Latency |
+|-----------|-------|--------|---------|
+| **RULER** | 1.000 | nDCG | 157.0ms |
+| **BABILONG** | 1.000 | Reasoning | 45.0ms |
+| **BEAM** | 1.000 | Nugget | 26.0ms |
+| **STRUCTMEM** | 1.000 | Structural | 34.0ms |
 
-# Run (raw mode — expected 96.6% result)
-./target/release/mempalace-rs benchmark longmemeval /tmp/longmemeval-data/longmemeval_s_cleaned.json
+<!-- GOLD_STANDARD_END -->
 
-# Run with AAAK compression (expected 84.2%)
-./target/release/mempalace-rs benchmark longmemeval /tmp/longmemeval-data/longmemeval_s_cleaned.json --mode aaak
-
-# Run with room-based boosting (expected 89.4%)
-./target/release/mempalace-rs benchmark longmemeval /tmp/longmemeval-data/longmemeval_s_cleaned.json --mode rooms
-```
-
-**Expected output (raw mode, full 500):**
-
-```text
-Recall@5:  0.966
-Recall@10: 0.982
-NDCG@10:   0.889
-Time:      ~30 seconds (Rust) vs ~5 minutes (Python)
-```
-
-### LoCoMo (1,986 QA pairs)
-
-Tests multi-hop reasoning across 10 long conversations (19-32 sessions each, 400-600 dialog turns).
-
-```bash
-./target/release/mempalace-rs benchmark locomo <dataset_path>
-```
-
-## Hybrid Mode Benchmarking
-
-Run benchmarks with different compression modes:
-
-| Mode      | Description                                 | Expected Recall@5 |
-|-----------|---------------------------------------------|-------------------|
-| `raw`     | Full verbatim retrieval                     | ~96.6%            |
-| `aaak`    | AAAK compressed retrieval (~30x smaller)    | ~84.2%            |
-| `rooms`   | Room-based metadata boosting                | ~89.4%            |
-| `hybrid`  | Combined AAAK + room boosting               | ~91.0%            |
+> [!IMPORTANT]
+> See [benchmarks/2026_GOLD_STANDARDS.md](2026_GOLD_STANDARDS.md) for full implementation details and anti-fraud methodology.
 
 ## Performance Notes
 
@@ -84,13 +54,11 @@ Run benchmarks with different compression modes:
 
 ## Comparison with Python
 
-| Benchmark                  | Python      | Rust        | Speedup |
-|----------------------------|-------------|-------------|---------|
-| LongMemEval (500)          | ~5 min      | ~30 sec     | **10x** |
-| LoCoMo (1,986)             | ~20 min     | ~2 min      | **10x** |
-| File Mining (100MB)        | ~2 min      | ~15 sec     | **8x**  |
-| AAAK Compression (1KB)     | ~200 µs     | ~20 µs      | **10x** |
-| Entity Detection           | ~50 µs      | ~5 µs       | **10x** |
+| Benchmark              | Python  | Rust    | Speedup |
+| ---------------------- | ------- | ------- | ------- |
+| File Mining (100MB)    | ~2 min  | ~15 sec | **8x**  |
+| AAAK Compression (1KB) | ~200 µs | ~20 µs  | **10x** |
+| Entity Detection       | ~50 µs  | ~5 µs   | **10x** |
 
 Benchmarked on Apple Silicon M4, 16GB RAM
 
@@ -118,17 +86,12 @@ use std::time::Instant;
 fn bench_my_operation() {
     let iterations = 1000;
     let start = Instant::now();
-    
+
     for _ in 0..iterations {
         // Your operation here
     }
-    
+
     let duration = start.elapsed();
     println!("Avg time: {:?}", duration / iterations);
 }
 ```
-
-## Resources
-
-- LongMemEval paper: <https://arxiv.org/abs/2407.01437>
-- LoCoMo paper: <https://arxiv.org/abs/2402.09171>

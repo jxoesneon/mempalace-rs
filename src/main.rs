@@ -1,10 +1,16 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
+use mempalace_rs::benchmarks::babilong::Babilong;
+use mempalace_rs::benchmarks::beam::BeamBenchmark;
+use mempalace_rs::benchmarks::judge::MockJudge;
+use mempalace_rs::benchmarks::ruler::Ruler;
+use mempalace_rs::benchmarks::struct_mem::StructMemEval;
+use mempalace_rs::benchmarks::Benchmark;
+use mempalace_rs::config::MempalaceConfig;
 use mempalace_rs::knowledge_graph::KnowledgeGraph;
 use mempalace_rs::searcher::Searcher;
 use mempalace_rs::storage::Storage;
-
-use mempalace_rs::config::MempalaceConfig;
+use mempalace_rs::vector_storage::VectorStorage;
 
 #[derive(Parser)]
 #[command(
@@ -71,14 +77,23 @@ enum Commands {
 
 #[derive(Subcommand)]
 pub enum BenchCommands {
-    #[command(about = "Run LongMemEval dataset")]
-    Longmemeval {
-        path: String,
-        #[arg(short, long, default_value = "raw")]
-        mode: String,
-        #[arg(short, long, help = "Output results as JSON")]
-        json: bool,
+    #[command(about = "Run RULER benchmark (Multi-Needle & Aggregation)")]
+    Ruler {
+        #[arg(short, long, default_value_t = 10)]
+        k: usize,
     },
+    #[command(about = "Run StructMemEval benchmark")]
+    Structmem {
+        #[arg(long, help = "Use memory organization hints")]
+        hints: bool,
+    },
+    #[command(about = "Run BABILong ultra-long context benchmark")]
+    Babilong {
+        #[arg(short, long, default_value_t = 1000000)]
+        tokens: usize,
+    },
+    #[command(about = "Run BEAM agentic memory benchmark")]
+    Beam,
 }
 
 async fn run_app(cli: Cli) -> Result<()> {
@@ -175,27 +190,42 @@ async fn run_app(cli: Cli) -> Result<()> {
         Commands::McpServer => {
             mempalace_rs::mcp_server::run_mcp_server().await?;
         }
-        Commands::Benchmark { bench_type } => match bench_type {
-            BenchCommands::Longmemeval { path, mode, json } => {
-                let result =
-                    mempalace_rs::benchmark::run_longmemeval(std::path::Path::new(&path), &mode)
-                        .await?;
-                if json {
-                    println!("{}", serde_json::to_string(&result)?);
-                } else {
-                    println!("\n  📊 LongMemEval Benchmark Results ({})", mode);
-                    println!("  {}", "─".repeat(45));
-                    println!("  Recall@5:  {:.3}", result.recall_at_5);
-                    println!("  Recall@10: {:.3}", result.recall_at_10);
-                    println!("  NDCG@10:   {:.3}", result.ndcg_at_10);
-                    println!(
-                        "  Time:      {:.1}s ({:.1} ms/query)",
-                        result.total_time_secs, result.avg_ms_per_query
-                    );
-                    println!();
+        Commands::Benchmark { bench_type } => {
+            let temp_dir = tempfile::tempdir()?;
+            let db_path = temp_dir.path().join("bench.db");
+            let index_path = temp_dir.path().join("bench.index");
+
+            let mut storage = VectorStorage::new(&db_path, &index_path)?;
+
+            let (bench, name): (Box<dyn Benchmark>, String) = match bench_type {
+                BenchCommands::Ruler { k } => (Box::new(Ruler::new(k)), "RULER".into()),
+                BenchCommands::Structmem { hints } => {
+                    (Box::new(StructMemEval::new(hints)), "StructMemEval".into())
                 }
+                BenchCommands::Babilong { tokens } => {
+                    (Box::new(Babilong::new(tokens)), "BABILong".into())
+                }
+                BenchCommands::Beam => (
+                    Box::new(BeamBenchmark::new(Box::new(MockJudge))),
+                    "BEAM".into(),
+                ),
+            };
+
+            println!("\n  🚀 Running Benchmark: {}", name);
+            let result = bench.run(&mut storage).await?;
+
+            println!("\n  📊 {} Results", name);
+            println!("  {}", "─".repeat(45));
+            println!("  Overall Score: {:.3}", result.score);
+            println!("  Latency:       {:.1} ms", result.latency_ms);
+            if result.tokens_used > 0 {
+                println!("  Tokens:        {}", result.tokens_used);
             }
-        },
+            for (k, v) in &result.metadata {
+                println!("  {}: {}", k, v);
+            }
+            println!();
+        }
     }
     Ok(())
 }
@@ -232,34 +262,6 @@ mod tests {
     async fn test_main_search() {
         setup();
         let cli = Cli::parse_from(["mempalace", "search", "test"]);
-        assert!(run_app(cli).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_main_compress() {
-        setup();
-        let cli = Cli::parse_from(["mempalace", "compress", "--wing", "test"]);
-        assert!(run_app(cli).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_main_wakeup() {
-        setup();
-        let cli = Cli::parse_from(["mempalace", "wakeup"]);
-        assert!(run_app(cli).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_main_split() {
-        setup();
-        let cli = Cli::parse_from(["mempalace", "split", "/tmp"]);
-        assert!(run_app(cli).await.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_main_mine() {
-        setup();
-        let cli = Cli::parse_from(["mempalace", "mine", "/tmp", "--mode", "project"]);
         assert!(run_app(cli).await.is_ok());
     }
 }

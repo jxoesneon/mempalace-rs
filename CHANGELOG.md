@@ -51,7 +51,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - L1: Essential layer (~500-800 tokens)
   - L2: On-Demand similarity search
   - L3: Raw semantic search
-  
 - **AAAK Compression**: Symbolic dialect for ~30x token reduction
   - Entity codes and emotion encoding
   - Zettel format: `WING|ROOM|DATE|SOURCE\n0:ENTITIES|TOPICS|"QUOTE"|EMOTIONS|FLAGS`

@@ -5,49 +5,49 @@
 
 ## 1. Overall Statistics
 
-| Metric | Value |
-|--------|-------|
-| Total Files | 34640 |
-| Total Size (raw) | 9.42 GB |
-| **Project Source Files** | **84** |
-| **Project Source Size** | **351.14 MB** |
-| Third-Party Files | 0 |
-| Third-Party Size | 0 B |
-| Noise Files (build artifacts) | 34556 |
-| Noise Size (build artifacts) | 9.07 GB |
-| Project Code Ratio | 3.6% |
+| Metric                        | Value         |
+| ----------------------------- | ------------- |
+| Total Files                   | 34640         |
+| Total Size (raw)              | 9.42 GB       |
+| **Project Source Files**      | **84**        |
+| **Project Source Size**       | **351.14 MB** |
+| Third-Party Files             | 0             |
+| Third-Party Size              | 0 B           |
+| Noise Files (build artifacts) | 34556         |
+| Noise Size (build artifacts)  | 9.07 GB       |
+| Project Code Ratio            | 3.6%          |
 
 ## 2. Top-Level Directory Breakdown
 
-| Directory | Project Files | Project Size | Total Size | Build Systems | Notes |
-|-----------|--------------|-------------|------------|---------------|-------|
-| `assets` | 2 | 3.15 MB | 3.15 MB | - |  |
-| `benches` | 1 | 1.67 KB | 1.67 KB | - |  |
-| `benchmarks` | 1 | 3.85 KB | 3.85 KB | - |  |
-| `examples` | 1 | 3.32 KB | 3.32 KB | - |  |
-| `hooks` | 3 | 8.25 KB | 8.25 KB | - |  |
-| `models` | 16 | 173.76 MB | 173.76 MB | - |  |
-| `scripts` | 1 | 2.88 KB | 2.88 KB | - |  |
-| `src` | 21 | 278.35 KB | 278.74 KB | - |  |
-| `target` | 0 | 0 B | 9.07 GB | - | build artifact |
-| `tests` | 7 | 17.42 KB | 17.42 KB | - |  |
+| Directory    | Project Files | Project Size | Total Size | Build Systems | Notes          |
+| ------------ | ------------- | ------------ | ---------- | ------------- | -------------- |
+| `assets`     | 2             | 3.15 MB      | 3.15 MB    | -             |                |
+| `benches`    | 1             | 1.67 KB      | 1.67 KB    | -             |                |
+| `benchmarks` | 1             | 3.85 KB      | 3.85 KB    | -             |                |
+| `examples`   | 1             | 3.32 KB      | 3.32 KB    | -             |                |
+| `hooks`      | 3             | 8.25 KB      | 8.25 KB    | -             |                |
+| `models`     | 16            | 173.76 MB    | 173.76 MB  | -             |                |
+| `scripts`    | 1             | 2.88 KB      | 2.88 KB    | -             |                |
+| `src`        | 21            | 278.35 KB    | 278.74 KB  | -             |                |
+| `target`     | 0             | 0 B          | 9.07 GB    | -             | build artifact |
+| `tests`      | 7             | 17.42 KB     | 17.42 KB   | -             |                |
 
 ## 3. Source File Statistics by Tech Stack (project files only)
 
-| Tech Stack | File Count | Total Size |
-|------------|------------|------------|
-| C/C++ | 0 | 0 B |
-| Java/Android | 0 | 0 B |
-| iOS (OC/Swift) | 0 | 0 B |
-| C#/.NET | 0 | 0 B |
-| Web/JS/TS | 0 | 0 B |
-| CSS/Style | 0 | 0 B |
+| Tech Stack     | File Count | Total Size |
+| -------------- | ---------- | ---------- |
+| C/C++          | 0          | 0 B        |
+| Java/Android   | 0          | 0 B        |
+| iOS (OC/Swift) | 0          | 0 B        |
+| C#/.NET        | 0          | 0 B        |
+| Web/JS/TS      | 0          | 0 B        |
+| CSS/Style      | 0          | 0 B        |
 
 ## 4. Third-Party Dependencies Detected
 
-| Library | Version | Locations | Files | Size |
-|---------|---------|-----------|------:|-----:|
-| fmt | unknown | `target/doc/trait.impl/core/fmt` | 1 | 5.02 KB |
+| Library | Version | Locations                        | Files |    Size |
+| ------- | ------- | -------------------------------- | ----: | ------: |
+| fmt     | unknown | `target/doc/trait.impl/core/fmt` |     1 | 5.02 KB |
 
 **Third-party container directories** (may contain multiple libraries):
 
@@ -90,14 +90,14 @@ mempalace-rs/
 Found **1** git repositories.
 
 | Repository | Total Commits | Recent (1yr) | Last Commit |
-|-----------|---------------|-------------|-------------|
-| `(root)` | 6 | 6 | 2026-04-08 |
+| ---------- | ------------- | ------------ | ----------- |
+| `(root)`   | 6             | 6            | 2026-04-08  |
 
 ## 8. Noise Directory Summary
 
-| Type | Occurrences (files) | Total Size |
-|------|--------------------:|------------|
-| `target/` | 40141 | 11.08 GB |
-| `build/` | 1652 | 385.96 MB |
-| `.git/` | 112 | 3.34 MB |
-| `bin/` | 2 | 798 B |
+| Type      | Occurrences (files) | Total Size |
+| --------- | ------------------: | ---------- |
+| `target/` |               40141 | 11.08 GB   |
+| `build/`  |                1652 | 385.96 MB  |
+| `.git/`   |                 112 | 3.34 MB    |
+| `bin/`    |                   2 | 798 B      |

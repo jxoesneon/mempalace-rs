@@ -75,16 +75,16 @@ if [ -f "$SESSION_FILE" ]; then
     SESSION_START=$(cat "$SESSION_FILE")
     NOW=$(date +%s)
     DURATION=$((NOW - SESSION_START))
-    
+
     # Save every hour
     if [ $DURATION -gt 3600 ]; then
         # Capture recent activity
         LAST_CMD=$(history 1 | sed 's/^[ ]*[0-9]*[ ]*//')
-        
+
         cargo run --bin mempalace -- diary-write \
             --agent save-hook \
             --content "Periodic save: duration=${DURATION}s, last_cmd=$LAST_CMD"
-        
+
         # Reset session timer
         echo $NOW > "$SESSION_FILE"
     fi
@@ -202,12 +202,12 @@ esac
 
 ## Hook Environment Variables
 
-| Variable                  | Description                        |
-|---------------------------|------------------------------------|
-| `MEMPALACE_HOME`          | Path to MemPalace data directory   |
-| `MEMPALACE_SESSION_START` | Unix timestamp of session start    |
-| `MEMPALACE_HOOK_TYPE`     | Type of hook being run             |
-| `MEMPALACE_QUIET`         | Suppress output if set             |
+| Variable                  | Description                      |
+| ------------------------- | -------------------------------- |
+| `MEMPALACE_HOME`          | Path to MemPalace data directory |
+| `MEMPALACE_SESSION_START` | Unix timestamp of session start  |
+| `MEMPALACE_HOOK_TYPE`     | Type of hook being run           |
+| `MEMPALACE_QUIET`         | Suppress output if set           |
 
 ## Troubleshooting
 
