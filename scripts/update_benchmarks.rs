@@ -5,15 +5,16 @@ use std::path::Path;
 use std::process::Command;
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct NativeBenchResult {
-    pub recall_at_5: f64,
-    pub recall_at_10: f64,
-    pub ndcg_at_10: f64,
-    pub total_time_secs: f64,
-    pub avg_ms_per_query: f64,
+pub struct BenchmarkResult {
+    pub name: String,
+    pub score: f64,
+    pub metric_name: String,
+    pub latency_ms: f64,
+    pub tokens_used: usize,
+    pub metadata: std::collections::HashMap<String, String>,
 }
 
-type NativeReportRow = (String, String, String, String);
+type GoldStandardRow = (String, String, String, String);
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Collect Criterion micro-benchmarks
@@ -60,79 +61,74 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 2. Collect Native AAAK Evolution Benchmarks (Speed & Accuracy)
-    let native_results = run_native_benchmarks()?;
+    // 2. Collect 2026 Gold Standard Benchmarks
+    let gold_results = run_gold_standard_benchmarks()?;
 
     // 3. Update Documentation
-    update_markdown_all("README.md", &micro_benchmarks, &native_results)?;
-    update_markdown_all("benchmarks/README.md", &micro_benchmarks, &native_results)?;
+    update_markdown_all("README.md", &micro_benchmarks, &gold_results)?;
+    update_markdown_all("benchmarks/README.md", &micro_benchmarks, &gold_results)?;
 
     Ok(())
 }
 
-fn run_native_benchmarks() -> Result<Vec<NativeReportRow>, Box<dyn std::error::Error>> {
+fn run_gold_standard_benchmarks() -> Result<Vec<GoldStandardRow>, Box<dyn std::error::Error>> {
     let mut results = Vec::new();
-    let fixture_path = "tests/fixtures/longmemeval_ci.json";
 
-    // Check if binary and fixture exist
-    if !Path::new(fixture_path).exists() {
-        println!(
-            "Skipping native benchmarks: fixture not found at {}",
-            fixture_path
-        );
-        return Ok(results);
-    }
+    // We run each benchmark and capture the result
+    // In CI, we expect the binaries to be built already
+    let commands = [
+        ("ruler", vec!["benchmark", "ruler", "--k", "10"]),
+        ("structmem", vec!["benchmark", "structmem", "--hints"]),
+        (
+            "babilong",
+            vec!["benchmark", "babilong", "--tokens", "1000000"],
+        ),
+        ("beam", vec!["benchmark", "beam"]),
+    ];
 
-    let modes = ["raw", "aaak"];
-    for mode in &modes {
-        println!("Running native benchmark for mode: {}...", mode);
-        let output = Command::new("cargo")
-            .args([
-                "run",
-                "--quiet",
-                "--",
-                "benchmark",
-                "longmemeval",
-                fixture_path,
-                "--mode",
-                mode,
-                "--json",
-            ])
-            .output()?;
+    for (name, args) in commands {
+        println!("Running 2026 Gold Standard: {}...", name);
+        // Note: In this simulation we assume the binary is target/debug/mempalace-rs
+        // In CI it might be target/release/mempalace-rs
+        let binary = if Path::new("target/release/mempalace-rs").exists() {
+            "target/release/mempalace-rs"
+        } else {
+            "target/debug/mempalace-rs"
+        };
+
+        let output = Command::new(binary).args(args).output()?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            println!(
-                "Warning: Native benchmark for {} failed: {}",
-                mode,
-                stderr.trim()
-            );
+            println!("Warning: Benchmark {} failed", name);
             continue;
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        // Find the line that looks like JSON
-        let json_line = stdout
-            .lines()
-            .find(|line| line.trim().starts_with('{') && line.trim().ends_with('}'));
+        // Find the score and metric from the pretty-printed output
+        // (A more robust way would be adding a --json flag to all benchmarks,
+        // but for now we parse the pretty output as requested)
 
-        if let Some(json_str) = json_line {
-            if let Ok(res) = serde_json::from_str::<NativeBenchResult>(json_str.trim()) {
-                results.push((
-                    mode.to_uppercase(),
-                    format!("{:.1}%", res.recall_at_5 * 100.0),
-                    format!("{:.1}%", res.recall_at_10 * 100.0),
-                    format!("{:.1}ms", res.avg_ms_per_query),
-                ));
-            } else {
-                println!("Warning: Failed to parse JSON for {}: {}", mode, json_str);
+        let mut score = "0.000".to_string();
+        let mut metric = "N/A".to_string();
+        let mut latency = "0.0ms".to_string();
+
+        for line in stdout.lines() {
+            if line.contains("Overall Score:") {
+                score = line.split(':').nth(1).unwrap_or("0.000").trim().to_string();
+            } else if line.contains("Latency:") {
+                latency = line.split(':').nth(1).unwrap_or("0.0ms").trim().to_string();
+            } else if name == "ruler" && line.contains("RULER Results") {
+                metric = "nDCG".to_string();
+            } else if name == "structmem" && line.contains("StructMemEval Results") {
+                metric = "Structural".to_string();
+            } else if name == "babilong" && line.contains("BABILong Results") {
+                metric = "Reasoning".to_string();
+            } else if name == "beam" && line.contains("BEAM Results") {
+                metric = "Nugget".to_string();
             }
-        } else {
-            println!(
-                "Warning: No JSON found in output for {}. Stdout: {}",
-                mode, stdout
-            );
         }
+
+        results.push((name.to_uppercase(), score, metric, latency));
     }
 
     Ok(results)
@@ -141,7 +137,7 @@ fn run_native_benchmarks() -> Result<Vec<NativeReportRow>, Box<dyn std::error::E
 fn update_markdown_all(
     path: &str,
     micro: &[(String, String, String)],
-    native: &[(String, String, String, String)],
+    gold: &[(String, String, String, String)],
 ) -> Result<(), Box<dyn std::error::Error>> {
     if !Path::new(path).exists() {
         return Ok(());
@@ -157,12 +153,12 @@ fn update_markdown_all(
         &generate_micro_table(micro),
     );
 
-    // Update Native benchmarks
+    // Update Gold Standard benchmarks
     content = replace_between(
         &content,
-        "<!-- ACCURACY_TABLE_START -->",
-        "<!-- ACCURACY_TABLE_END -->",
-        &generate_native_table(native),
+        "<!-- GOLD_STANDARD_START -->",
+        "<!-- GOLD_STANDARD_END -->",
+        &generate_gold_table(gold),
     );
 
     fs::write(path, content)?;
@@ -197,12 +193,14 @@ fn generate_micro_table(benches: &[(String, String, String)]) -> String {
     table
 }
 
-fn generate_native_table(benches: &[(String, String, String, String)]) -> String {
-    let mut table = String::from("\n| Mode | Recall@5 | Recall@10 | Latency/Query |\n|------|----------|-----------|---------------|\n");
-    for (mode, r5, r10, lat) in benches {
+fn generate_gold_table(benches: &[(String, String, String, String)]) -> String {
+    let mut table = String::from(
+        "\n| Benchmark | Score | Metric | Latency |\n|-----------|-------|--------|---------|\n",
+    );
+    for (name, score, metric, lat) in benches {
         table.push_str(&format!(
-            "| {:<4} | {:<8} | {:<9} | {:<13} |\n",
-            mode, r5, r10, lat
+            "| **{:<10}** | {:<5} | {:<10} | {:<7} |\n",
+            name, score, metric, lat
         ));
     }
     table

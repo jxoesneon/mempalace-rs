@@ -5,6 +5,7 @@
 //! conversations into a structured palace and knowledge graph.
 
 pub mod benchmark;
+pub mod benchmarks;
 pub mod config;
 pub mod convo_miner;
 pub mod dialect;
