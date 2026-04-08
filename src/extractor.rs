@@ -26,6 +26,10 @@ lazy_static::lazy_static! {
         Regex::new(r"(?i)\bset (it |this )?to\b").unwrap(),
         Regex::new(r"(?i)\bconfigure\b").unwrap(),
         Regex::new(r"(?i)\bdefault\b").unwrap(),
+        Regex::new(r"(?i)\bwho:").unwrap(),
+        Regex::new(r"(?i)\bwhat:").unwrap(),
+        Regex::new(r"(?i)\bwhy:").unwrap(),
+        Regex::new(r"(?i)\bconfidence:").unwrap(),
     ];
 
     pub static ref PREFERENCE_MARKERS: Vec<Regex> = vec![
@@ -150,6 +154,12 @@ lazy_static::lazy_static! {
         Regex::new(r"^\s*\w+\.\w+\(").unwrap(),
         Regex::new(r"^\s*\w+ = \w+\.\w+").unwrap(),
     ];
+    
+    // DECISION Matrix Extraction Patterns
+    pub static ref DECISION_WHO: Regex = Regex::new(r"(?i)\b(who|by):\s*([A-Z][a-zA-Z]+)\b").unwrap();
+    pub static ref DECISION_WHAT: Regex = Regex::new(r"(?i)\b(what|decision):\s*(.+?)(?:\.|$|;)").unwrap();
+    pub static ref DECISION_WHY: Regex = Regex::new(r"(?i)\b(why|rationale|because):\s*(.+?)(?:\.|$|;)").unwrap();
+    pub static ref DECISION_CONFIDENCE: Regex = Regex::new(r"(?i)\b(confidence|certainty):\s*(high|med|low|moderate)\b").unwrap();
 
     pub static ref POSITIVE_WORDS: HashSet<&'static str> = {
         let mut s = HashSet::new();
@@ -182,6 +192,7 @@ pub struct StructuredMemory {
     pub content: String,
     pub memory_type: MemoryType,
     pub topic: Option<String>,
+    pub matrix: HashMap<String, String>,
     pub sentiment: f32,
     pub confidence: f32,
     pub chunk_index: usize,
@@ -253,11 +264,28 @@ pub fn extract_structured_memories(text: &str) -> Vec<StructuredMemory> {
 
         let sentiment_val = get_sentiment_score(&prose);
         let topic = extract_topic(&prose);
+        
+        let mut matrix = HashMap::new();
+        if max_type == MemoryType::Decision {
+            if let Some(caps) = DECISION_WHO.captures(&prose) {
+                matrix.insert("WHO".to_string(), caps.get(2).unwrap().as_str().trim().to_string());
+            }
+            if let Some(caps) = DECISION_WHAT.captures(&prose) {
+                matrix.insert("WHAT".to_string(), caps.get(2).unwrap().as_str().trim().to_string());
+            }
+            if let Some(caps) = DECISION_WHY.captures(&prose) {
+                matrix.insert("WHY".to_string(), caps.get(2).unwrap().as_str().trim().to_string());
+            }
+            if let Some(caps) = DECISION_CONFIDENCE.captures(&prose) {
+                matrix.insert("CONFIDENCE".to_string(), caps.get(2).unwrap().as_str().trim().to_string().to_uppercase());
+            }
+        }
 
         memories.push(StructuredMemory {
             content: segment.trim().to_string(),
             memory_type: max_type,
             topic,
+            matrix,
             sentiment: sentiment_val,
             confidence,
             chunk_index: memories.len(),

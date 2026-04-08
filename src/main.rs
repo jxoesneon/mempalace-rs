@@ -62,6 +62,21 @@ enum Commands {
     },
     #[command(name = "mcp-server", about = "Run the MCP server over stdio")]
     McpServer,
+    #[command(about = "Run evaluations and benchmarks")]
+    Benchmark {
+        #[command(subcommand)]
+        bench_type: BenchCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum BenchCommands {
+    #[command(about = "Run LongMemEval dataset")]
+    Longmemeval {
+        path: String,
+        #[arg(short, long, default_value = "raw")]
+        mode: String,
+    },
 }
 
 async fn run_app(cli: Cli) -> Result<()> {
@@ -151,6 +166,20 @@ async fn run_app(cli: Cli) -> Result<()> {
         }
         Commands::McpServer => {
             mempalace_rs::mcp_server::run_mcp_server().await?;
+        }
+        Commands::Benchmark { bench_type } => {
+            match bench_type {
+                BenchCommands::Longmemeval { path, mode } => {
+                    let result = mempalace_rs::benchmark::run_longmemeval(std::path::Path::new(&path), &mode).await?;
+                    println!("\n  📊 LongMemEval Benchmark Results ({})", mode);
+                    println!("  {}", "─".repeat(45));
+                    println!("  Recall@5:  {:.3}", result.recall_at_5);
+                    println!("  Recall@10: {:.3}", result.recall_at_10);
+                    println!("  NDCG@10:   {:.3}", result.ndcg_at_10);
+                    println!("  Time:      {:.1}s ({:.1} ms/query)", result.total_time_secs, result.avg_ms_per_query);
+                    println!();
+                }
+            }
         }
     }
     Ok(())

@@ -37,6 +37,7 @@ symspell = "0.3.0"
 reqwest = { version = "0.12", features = ["json"] }
 rayon = "1.10"
 dialoguer = "0.11"
+tempfile = "3.27.0"
 lazy_static = "1.5.0"
 
 # Pure-Rust storage engine dependencies (replaces ChromaDB)
@@ -48,7 +49,6 @@ name = "update-benchmarks"
 path = "scripts/update_benchmarks.rs"
 
 [dev-dependencies]
-tempfile = "3.27.0"
 criterion = { version = "0.5", features = ["html_reports"] }
 
 [[bench]]

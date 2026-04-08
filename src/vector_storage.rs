@@ -75,10 +75,6 @@ pub struct VectorStorage {
 
 impl VectorStorage {
     pub fn new(db_path: impl AsRef<Path>, index_path: impl AsRef<Path>) -> Result<Self> {
-        // 1. Embedding model - resolve cache dir in priority order:
-        //    a) MEMPALACE_MODELS_DIR env var (explicit config)
-        //    b) models/ next to the running executable (release bundle)
-        //    c) None → fastembed downloads on first use
         let cache_dir = std::env::var("MEMPALACE_MODELS_DIR")
             .ok()
             .map(PathBuf::from)
@@ -99,7 +95,15 @@ impl VectorStorage {
 
         let embedder =
             TextEmbedding::try_new(init_opts).context("Failed to initialise fastembed")?;
+        
+        Self::new_with_embedder(db_path, index_path, Arc::new(embedder))
+    }
 
+    pub fn new_with_embedder(
+        db_path: impl AsRef<Path>,
+        index_path: impl AsRef<Path>,
+        embedder: Arc<TextEmbedding>,
+    ) -> Result<Self> {
         // 2. SQLite
         let db = Connection::open(db_path.as_ref())
             .with_context(|| format!("Cannot open SQLite at {:?}", db_path.as_ref()))?;
@@ -174,7 +178,7 @@ impl VectorStorage {
         };
 
         Ok(Self {
-            embedder: Arc::new(embedder),
+            embedder,
             db,
             index,
         })

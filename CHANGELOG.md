@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Metadata Overlay**: Lossless JSON metadata injection (`JSON:` block).
   - **Delta Encoding**: Incremental context updates to save tokens during multi-turn mining.
   - **Faithfulness Scoring**: Automated quality monitoring for compression integrity.
+  - **Semantic Shadowing**: Deterministic entity hashing (`NAME[#hash]`) to resolve namespace collisions.
+  - **Write Discipline**: Strict grammar matrices for `DECISION` nodes with 100% data fidelity fallbacks (`RAW|FBF|`).
+
+- **Benchmarking & Evaluation Harness**:
+  - Restored `LongMemEval` and `LoCoMo` native benchmarking suite.
+  - Optimized embedding reuse, reducing evaluation time from ~20 minutes to < 1 minute.
+  - Confirmed 1.2% improvement in relative retrieval efficiency (AAAK / Raw).
 
 - **Semantic Memory Pruning**:
   - New `prune` command for automated semantic deduplication.

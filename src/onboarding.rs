@@ -53,6 +53,7 @@ pub fn run_onboarding() -> Result<()> {
     for person in &people {
         registry.register_entity(&DetectedEntity {
             name: person.clone(),
+            unique_id: None,
             r#type: EntityType::Person,
             confidence: 1.0,
             signals: vec!["onboarding".to_string()],
@@ -64,6 +65,7 @@ pub fn run_onboarding() -> Result<()> {
     for project in &projects {
         registry.register_entity(&DetectedEntity {
             name: project.clone(),
+            unique_id: None,
             r#type: EntityType::Project,
             confidence: 1.0,
             signals: vec!["onboarding".to_string()],

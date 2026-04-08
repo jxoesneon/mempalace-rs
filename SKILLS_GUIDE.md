@@ -141,5 +141,22 @@ Visit [Smithery.ai](https://smithery.ai) and search for `mempalace-rs`. You can 
 
 ---
 
+## 💎 Hardened AAAK Protocol (v3.2)
+
+Your agent can now leverage the high-stakes features of the v3.2 protocol. When interacting with the memory palace, be aware of:
+
+### 1. High-Stakes Write Discipline
+For critical memories (e.g., product decisions, architectural shifts), use the **Grammar Matrix** triggers:
+- **Triggers**: `WHO:`, `WHAT:`, `WHY:`, `CONFIDENCE:`
+- **Failsafe**: If validation fails, the palace automatically buffers the raw text (`RAW|FBF|`) to ensure zero context loss.
+
+### 2. Semantic Shadowing
+Entities are now uniquely identified via deterministic hashes. Instead of generic `KAI`, you will see `KAI[#8f92a]`. This prevents cross-project entity pollution and ensures specific context is never mixed.
+
+### 3. Faithfulness Auditing
+Optionally inspect the `JSON:` metadata line in compressed blocks to check the `faithfulness_score` (0.0 to 1.0). If you detect low faithfulness, use the `raw` search mode to retrieve verbatim context.
+
+---
+
 ## 🧪 Advanced: Custom SDK Integration
 Want to build your own? See the [Programmatic Usage](examples/README.md#programmatic-usage-rust-api) guide to use our Rust crate directly in your specialized agents.

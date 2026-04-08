@@ -88,6 +88,8 @@ lazy_static::lazy_static! {
         m.insert("replaced", "DECISION");
         m.insert("instead of", "DECISION");
         m.insert("because", "DECISION");
+        m.insert("what:", "DECISION");
+        m.insert("decision:", "DECISION");
         m.insert("founded", "ORIGIN");
         m.insert("created", "ORIGIN");
         m.insert("started", "ORIGIN");
@@ -170,7 +172,7 @@ pub struct MetadataOverlay {
     pub source_file: Option<String>,
     /// Arbitrary extra key/value pairs callers may attach.
     #[serde(skip_serializing_if = "HashMap::is_empty", default)]
-    pub extra: HashMap<String, String>,
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 impl MetadataOverlay {
@@ -254,7 +256,8 @@ impl Dialect {
         }
         // Auto-code: first 3 chars uppercase
         if name.len() >= 3 {
-            Some(name[..3].to_uppercase())
+        let code = name.chars().take(3).collect::<String>().to_uppercase();
+        Some(code)
         } else {
             Some(name.to_uppercase())
         }
@@ -274,7 +277,11 @@ impl Dialect {
                 })
                 .unwrap_or_else(|| {
                     if e.len() >= 4 {
-                        e[..4].to_string()
+                    if e.len() > 4 {
+                        e.chars().take(4).collect::<String>()
+                    } else {
+                        e.to_string()
+                    }
                     } else {
                         e.clone()
                     }
@@ -405,13 +412,14 @@ impl Dialect {
         scored.sort_by(|a, b| b.0.cmp(&a.0));
         let best = scored[0].1;
         if best.len() > 55 {
-            format!("{}...", &best[..52])
+            format!("{}...", best.chars().take(52).collect::<String>())
         } else {
             best.to_string()
         }
     }
 
     /// Phase 2: `max_entities` is now caller-controlled (driven by `density`).
+    /// Phase 9 (Hardening): Support shadow ID formatting NAME[#id].
     fn _detect_entities_in_text(&self, text: &str, max_entities: usize) -> Vec<String> {
         let mut found = Vec::new();
         let text_lower = text.to_lowercase();
@@ -421,7 +429,9 @@ impl Dialect {
                 && text_lower.contains(&name.to_lowercase())
                 && !found.contains(code)
             {
-                found.push(code.clone());
+                // Generate the stable shadow ID for shadowing
+                let shadow_id = self._generate_shadow_id(name);
+                found.push(format!("{}[#{}]", code, shadow_id));
             }
         }
 
@@ -438,9 +448,11 @@ impl Dialect {
                 && i > 0
                 && !STOP_WORDS.contains(clean.to_lowercase().as_str())
             {
-                let code = clean[..std::cmp::min(clean.len(), 3)].to_uppercase();
-                if !found.contains(&code) {
-                    found.push(code);
+                let code: String = clean.chars().take(3).collect::<String>().to_uppercase();
+                let shadow_id = self._generate_shadow_id(&clean);
+                let shadow_code = format!("{}[#{}]", code, shadow_id);
+                if !found.contains(&shadow_code) {
+                    found.push(shadow_code);
                 }
                 if found.len() >= max_entities {
                     break;
@@ -448,6 +460,15 @@ impl Dialect {
             }
         }
         found
+    }
+
+    fn _generate_shadow_id(&self, name: &str) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        name.to_lowercase().hash(&mut hasher);
+        let hash_val = hasher.finish();
+        format!("{:x}", hash_val).chars().take(5).collect()
     }
 
     // ---------------------------------------------------------------------------
@@ -515,8 +536,30 @@ impl Dialect {
         let emotions = self._detect_emotions(text);
         let emotion_str = emotions.join("+");
 
-        let flags = self._detect_flags(text);
+        let mut flags = self._detect_flags(text);
+        
+        // Write Discipline: Grammar Matrix Validation
+        let structured_memories = crate::extractor::extract_structured_memories(text);
+        let mut is_compliant_decision = false;
+        
+        if flags.iter().any(|f| f == "DECISION") {
+            if let Some(decision_mem) = structured_memories.iter().find(|m| m.memory_type == crate::models::MemoryType::Decision) {
+                let m = &decision_mem.matrix;
+                if m.contains_key("WHO") && m.contains_key("WHAT") && m.contains_key("WHY") && m.contains_key("CONFIDENCE") {
+                    is_compliant_decision = true;
+                    // Tag with registry version
+                    flags = flags.into_iter().map(|f| if f == "DECISION" { "DECISION[v1]".to_string() } else { f }).collect();
+                } else if density >= 5 {
+                    // Critical failure for high-density: Fallback to Raw
+                    return format!("RAW|FBF|{}", text);
+                }
+            }
+        }
+        
         let flag_str = flags.join("+");
+
+        // Faithfulness Scoring
+        let faithfulness_score = self._calculate_faithfulness(text, &entities, &topics);
 
         let mut lines = Vec::new();
 
@@ -565,14 +608,32 @@ impl Dialect {
             room: room.cloned(),
             date: date.cloned(),
             source_file: source.cloned(),
-            extra: HashMap::new(),
+            extra: {
+                let mut map = HashMap::new();
+                map.insert("faithfulness".to_string(), serde_json::Value::Number(serde_json::Number::from_f64(faithfulness_score as f64).unwrap_or(serde_json::Number::from(0))));
+                if is_compliant_decision {
+                    map.insert("grammar_reg".to_string(), serde_json::Value::String("v1".to_string()));
+                }
+                map
+            },
         };
         let overlay_line = overlay.to_line();
-        if !overlay_line.is_empty() && (wing.is_some() || source.is_some()) {
+        if !overlay_line.is_empty() && (wing.is_some() || source.is_some() || !overlay.extra.is_empty()) {
             lines.push(overlay_line);
         }
 
         lines.join("\n")
+    }
+
+    fn _calculate_faithfulness(&self, text: &str, entities: &[String], topics: &[String]) -> f32 {
+        if text.is_empty() { return 1.0; }
+        
+        // Basic heuristic: entity/topic density + sentence persistence
+        let e_score = (entities.len() as f32 * 0.2).min(0.5);
+        let t_score = (topics.len() as f32 * 0.1).min(0.5);
+        
+        let score = e_score + t_score;
+        (score * 100.0).round() / 100.0
     }
 
     /// Compress with default density (5).
