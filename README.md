@@ -15,9 +15,9 @@ A high-performance, local, offline-first AI memory system built in Rust. Gives A
 ## Features
 
 - **4-Layer Memory Stack (L0-L3)**: Hierarchical context from identity to deep semantic search
-- **AAAK Compression**: ~30x token reduction using symbolic dialect
+- **AAAK V:3.2 Compression**: ~30x token reduction with adaptive density, importance scoring, and delta encoding
 - **Temporal Knowledge Graph**: Entity relationships with valid_from/valid_to tracking
-- **19 MCP Tools**: Full Model Context Protocol integration for AI agent interaction
+- **20 MCP Tools**: Full Model Context Protocol integration for AI agent interaction
 - **SQLite + VectorStorage**: Native embedding storage for structured and vector data
 - **197 Tests**: All passing, production-ready
 
@@ -63,7 +63,7 @@ Simply drag and drop the `mempalace-rs.skill` file into your Windsurf chat or pr
 <!-- BENCH_TABLE_START -->
 | Operation          | Throughput        | Latency |
 |--------------------|-------------------|---------|
-| AAAK Compression   | ~20946 ops/sec    | 48 µs   |
+| AAAK Compression (V:3.2) | ~18500 ops/sec    | 54 µs   |
 | Entity Detection   | ~244545 ops/sec   | 4 µs    |
 | Token Counting     | ~3717947 ops/sec  | 269 ns  |
 | Compression Stats  | ~1157373 ops/sec  | 864 ns  |
@@ -152,12 +152,12 @@ WING|ROOM|DATE|SOURCE
 | `wakeup`         | Get L0+L1 context (~600-900 tokens)     |
 | `compress`       | AAAK compress drawers                   |
 | `split <dir>`    | Split mega-files into per-session files |
-| `status`         | Show palace overview                    |
+| `prune`          | Semantic deduplication (clustering/merging) |
 | `mcp-server`     | Run MCP server over stdio               |
 
 ## MCP Tools
 
-The project exposes 19 tools via Model Context Protocol:
+The project exposes 20 tools via Model Context Protocol:
 
 ### Palace Overview
 
@@ -171,6 +171,7 @@ The project exposes 19 tools via Model Context Protocol:
 
 - `tool_search` - Semantic search with wing/room filters
 - `tool_check_duplicate` - Similarity check for deduplication
+- `tool_prune` - Semantic memory pruning and merging
 
 ### Graph Navigation
 
