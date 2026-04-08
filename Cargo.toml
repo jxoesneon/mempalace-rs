@@ -1,0 +1,60 @@
+[package]
+name = "mempalace-rs"
+version = "0.1.0"
+edition = "2021"
+description = "A high-performance, local, offline-first AI memory system built in Rust"
+license = "MIT"
+repository = "https://github.com/jxoesneon/mempalace-rs"
+homepage = "https://github.com/jxoesneon/mempalace-rs"
+keywords = ["memory", "ai", "mcp", "rag", "knowledge-graph"]
+categories = ["command-line-utilities", "database", "artificial-intelligence"]
+readme = "README.md"
+documentation = "https://docs.rs/mempalace-rs"
+exclude = [
+    "models/*",
+    ".fastembed_cache/*",
+    "assets/*",
+    "benchmarks/*",
+    "*.db",
+    "*.db-journal",
+    "target/*"
+]
+
+[dependencies]
+clap = { version = "4.6.0", features = ["derive"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+anyhow = "1.0.102"
+rusqlite = { version = "0.32", features = ["bundled"] }
+# chromadb = "2.3.0"  # Replaced by pure-Rust usearch + fastembed
+tokio = { version = "1.51.0", features = ["full"] }
+mcp_rs = { version = "0.1.0" }
+futures = "0.3.32"
+walkdir = "2.5.0"
+regex = "1.12.3"
+chrono = "0.4.44"
+symspell = "0.3.0"
+reqwest = { version = "0.12", features = ["json"] }
+rayon = "1.10"
+dialoguer = "0.11"
+lazy_static = "1.5.0"
+
+# Pure-Rust storage engine dependencies (replaces ChromaDB)
+fastembed = "4"
+usearch = { version = "2", features = ["simsimd"] }
+
+[[bin]]
+name = "update-benchmarks"
+path = "scripts/update_benchmarks.rs"
+
+[dev-dependencies]
+tempfile = "3.27.0"
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
+[[bin]]
+name = "download-model"
+path = "src/bin/download_model.rs"

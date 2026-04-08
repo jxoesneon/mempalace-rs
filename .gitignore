@@ -1,0 +1,17 @@
+/target
+**/*.db
+**/*.db-journal
+*.rs.bk
+reproduce_issue.rs
+repo-scan-data.md
+AUDIT_REPORT*.md
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
+GEMINI.md
+
+# Bundled fastembed models (87MB, fetch via download-model bin)
+/models/
+.fastembed_cache/
