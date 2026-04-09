@@ -13,8 +13,14 @@ cargo bench
 ### Results (Apple Silicon M4, 16GB RAM)
 
 <!-- BENCH_TABLE_START -->
-| Operation          | Throughput        | Latency |
-|--------------------|-------------------|---------|
+
+| Operation         | Throughput       | Latency |
+| ----------------- | ---------------- | ------- |
+| AAAK Compression  | ~824 ops/sec     | 1.2 ms  |
+| Entity Detection  | ~140577 ops/sec  | 7 µs    |
+| Token Counting    | ~2776962 ops/sec | 360 ns  |
+| Compression Stats | ~1026313 ops/sec | 974 ns  |
+
 <!-- BENCH_TABLE_END -->
 
 **Binary Size**: 7.9 MB (release build)  
@@ -26,12 +32,14 @@ cargo bench
 MemPalace-RS adheres to the **2026 Gold Standards** for AI memory validation. We have replaced legacy benchmarks (like LoCoMo and LongMemEval) with a rigorous suite designed to prevent "benchmaxx" fraud.
 
 <!-- GOLD_STANDARD_START -->
-| Benchmark | Score | Metric | Latency |
-|-----------|-------|--------|---------|
-| **RULER     ** | 1.000 | nDCG       | 133.0 ms |
-| **STRUCTMEM ** | 1.000 | Structural | 33.0 ms |
-| **BABILONG  ** | 1.000 | Reasoning  | 633.0 ms |
-| **BEAM      ** | 1.000 | Nugget     | 38.0 ms |
+
+| Benchmark      | Score | Metric     | Latency  |
+| -------------- | ----- | ---------- | -------- |
+| **RULER **     | 1.000 | nDCG       | 249.0 ms |
+| **STRUCTMEM ** | 1.000 | Structural | 67.0 ms  |
+| **BABILONG **  | 1.000 | Reasoning  | 976.0 ms |
+| **BEAM **      | 1.000 | Nugget     | 37.0 ms  |
+
 <!-- GOLD_STANDARD_END -->
 
 > [!IMPORTANT]

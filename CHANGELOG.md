@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-09
+
+### Added
+
+- **2026 Gold Standard Benchmarks**: Replaced legacy suites with RULER, StructMem, BABILong, and BEAM; achieved perfect 1.000 integrity.
+- **Android/Termux Support**: Added setup scripts and patched dependencies for mobile ARM environments.
+- **Production CLI**: New repair/instructions commands and advanced mining/search flags.
+- **Filesystem**: Native .gitignore support and enhanced narrative extraction.
+- **Infrastructure**: Artifact-Based CI Pipeline (70% faster) and resilient model ingestion.
+
+### Changed
+
+- **MCP Tool Standard**: Renamed all tools to mempalace\_ prefix.
+- **L1 Context**: Migrated to density-aware engine in dialect module.
+
 ## [0.2.0] - 2026-04-08
 
 ### Added

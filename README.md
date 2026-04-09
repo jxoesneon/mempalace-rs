@@ -75,12 +75,14 @@ MemPalace-rs is validated against the **2026 Gold Standards** for AI memory. Our
 _Verified multi-hop reasoning, 1M+ token persistence, and structural integrity._
 
 <!-- GOLD_STANDARD_START -->
-| Benchmark | Score | Metric | Latency |
-|-----------|-------|--------|---------|
-| **RULER     ** | 1.000 | nDCG       | 133.0 ms |
-| **STRUCTMEM ** | 1.000 | Structural | 33.0 ms |
-| **BABILONG  ** | 1.000 | Reasoning  | 633.0 ms |
-| **BEAM      ** | 1.000 | Nugget     | 38.0 ms |
+
+| Benchmark      | Score | Metric     | Latency  |
+| -------------- | ----- | ---------- | -------- |
+| **RULER **     | 1.000 | nDCG       | 249.0 ms |
+| **STRUCTMEM ** | 1.000 | Structural | 67.0 ms  |
+| **BABILONG **  | 1.000 | Reasoning  | 976.0 ms |
+| **BEAM **      | 1.000 | Nugget     | 37.0 ms  |
+
 <!-- GOLD_STANDARD_END -->
 
 > [!TIP]
@@ -91,8 +93,14 @@ _Verified multi-hop reasoning, 1M+ token persistence, and structural integrity._
 _Raw throughput measured on local hardware._
 
 <!-- BENCH_TABLE_START -->
-| Operation          | Throughput        | Latency |
-|--------------------|-------------------|---------|
+
+| Operation         | Throughput       | Latency |
+| ----------------- | ---------------- | ------- |
+| AAAK Compression  | ~824 ops/sec     | 1.2 ms  |
+| Entity Detection  | ~140577 ops/sec  | 7 µs    |
+| Token Counting    | ~2776962 ops/sec | 360 ns  |
+| Compression Stats | ~1026313 ops/sec | 974 ns  |
+
 <!-- BENCH_TABLE_END -->
 
 _Benchmarks performed on Apple Silicon M4. Results are generated autonomously by CI on every release._
@@ -175,18 +183,18 @@ WING|ROOM|DATE|SOURCE
 
 ## CLI Commands
 
-| Command          | Description                                 |
-| ---------------- | ------------------------------------------- |
-| `init <dir>`     | Guided onboarding with room detection       |
+| Command          | Description                                                                          |
+| ---------------- | ------------------------------------------------------------------------------------ |
+| `init <dir>`     | Guided onboarding with room detection                                                |
 | `mine <dir>`     | Ingest projects or conversations (supports `--limit`, `--dry-run`, `--no-gitignore`) |
-| `search <query>` | Semantic search over ingested data (supports `--wing`, `--room`, `--results`) |
-| `repair`         | Recover/re-index vector storage from SQLite metadata |
-| `instructions`   | Output system prompts for AI agent onboarding |
-| `wakeup`         | Get L0+L1 context (~600-900 tokens)         |
-| `compress`       | AAAK compress drawers                       |
-| `split <dir>`    | Split mega-files into per-session files     |
-| `prune`          | Semantic deduplication (clustering/merging) |
-| `mcp-server`     | Run MCP server over stdio                   |
+| `search <query>` | Semantic search over ingested data (supports `--wing`, `--room`, `--results`)        |
+| `repair`         | Recover/re-index vector storage from SQLite metadata                                 |
+| `instructions`   | Output system prompts for AI agent onboarding                                        |
+| `wakeup`         | Get L0+L1 context (~600-900 tokens)                                                  |
+| `compress`       | AAAK compress drawers                                                                |
+| `split <dir>`    | Split mega-files into per-session files                                              |
+| `prune`          | Semantic deduplication (clustering/merging)                                          |
+| `mcp-server`     | Run MCP server over stdio                                                            |
 
 ## MCP Tools
 
