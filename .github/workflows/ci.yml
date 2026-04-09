@@ -70,7 +70,6 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: compiled-mempalace
-          path: target/release/
           merge-multiple: true
 
       # We still need to give execution permissions after download
@@ -96,12 +95,9 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: compiled-mempalace
-          path: target/release/
           merge-multiple: true
 
       - run: |
-          mkdir -p models
-          mv target/release/models/* models/ 2>/dev/null || true
           chmod +x target/release/mempalace-rs target/release/update-benchmarks
 
       - name: Run benchmarks
@@ -137,7 +133,6 @@ jobs:
         uses: actions/download-artifact@v5
         with:
           name: compiled-mempalace
-          path: target/release/
           merge-multiple: true
 
       - name: Install Rust (MacOS Native)
