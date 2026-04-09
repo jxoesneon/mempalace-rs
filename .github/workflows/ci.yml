@@ -45,7 +45,7 @@ jobs:
         run: ./target/release/download-model
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: compiled-mempalace
           path: |
@@ -67,7 +67,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: compiled-mempalace
           path: target/release/
@@ -93,7 +93,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: compiled-mempalace
           path: target/release/
@@ -134,7 +134,7 @@ jobs:
 
       - name: Download Artifacts
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: compiled-mempalace
           path: target/release/
@@ -159,7 +159,7 @@ jobs:
           tar -czf mempalace-rs-${{ matrix.os }}.tar.gz mempalace-rs-${{ matrix.os }}/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: distribution-${{ matrix.os }}
           path: mempalace-rs-${{ matrix.os }}.tar.gz
