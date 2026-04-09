@@ -139,6 +139,10 @@ lazy_static::lazy_static! {
         Regex::new(r"(?i)never told anyone").unwrap(),
         Regex::new(r"(?i)nobody knows").unwrap(),
         Regex::new(r"\*[^*]+\*").unwrap(),
+        Regex::new(r"(?i)\bsays:\b").unwrap(),
+        Regex::new(r"(?i)\barticulates:\b").unwrap(),
+        Regex::new(r"(?i)\bwhispers:\b").unwrap(),
+        Regex::new(r"(?i)\bshouts:\b").unwrap(),
     ];
 
     pub static ref CODE_LINE_PATTERNS: Vec<Regex> = vec![
@@ -160,6 +164,19 @@ lazy_static::lazy_static! {
     pub static ref DECISION_WHAT: Regex = Regex::new(r"(?i)\b(what|decision):\s*(.+?)(?:\.|$|;)").unwrap();
     pub static ref DECISION_WHY: Regex = Regex::new(r"(?i)\b(why|rationale|because):\s*(.+?)(?:\.|$|;)").unwrap();
     pub static ref DECISION_CONFIDENCE: Regex = Regex::new(r"(?i)\b(confidence|certainty):\s*(high|med|low|moderate)\b").unwrap();
+
+    pub static ref EMOTIONAL_WORDS: HashSet<&'static str> = {
+        let mut s = HashSet::new();
+        s.insert("love"); s.insert("hate"); s.insert("joy"); s.insert("grief");
+        s.insert("fear"); s.insert("wonder"); s.insert("rage"); s.insert("hope");
+        s.insert("despair"); s.insert("peace"); s.insert("relief"); s.insert("tender");
+        s.insert("raw"); s.insert("doubt"); s.insert("anxious"); s.insert("grateful");
+        s.insert("proud"); s.insert("hurt"); s.insert("happy"); s.insert("sad");
+        s.insert("lonely"); s.insert("beautiful"); s.insert("amazing"); s.insert("wonderful");
+        s.insert("excited"); s.insert("thrilled"); s.insert("exhausted"); s.insert("broken");
+        s.insert("scared"); s.insert("afraid"); s.insert("worried"); s.insert("sorry");
+        s
+    };
 
     pub static ref POSITIVE_WORDS: HashSet<&'static str> = {
         let mut s = HashSet::new();

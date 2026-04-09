@@ -131,12 +131,12 @@ pub fn extract_subject(lines: &[String]) -> String {
     "session".to_string()
 }
 
-pub fn split_mega_file(path: &Path, output_dir: &Path) -> Result<()> {
+pub fn split_mega_file(path: &Path, output_dir: &Path, min_sessions: usize) -> Result<()> {
     let content = fs::read_to_string(path).context("Failed to read mega-file")?;
     let lines: Vec<String> = content.lines().map(|s| s.to_string() + "\n").collect();
 
     let mut boundaries = find_session_boundaries(&lines);
-    if boundaries.len() < 2 {
+    if boundaries.len() < min_sessions {
         return Ok(()); // Not a mega-file
     }
 
@@ -301,7 +301,7 @@ mod tests {
         let file_path = dir.path().join("small.txt");
         fs::write(&file_path, "Claude Code v1.0\nJust one session.").unwrap();
 
-        let res = split_mega_file(&file_path, dir.path());
+        let res = split_mega_file(&file_path, dir.path(), 2);
         assert!(res.is_ok());
         // Should not have split anything or renamed
         assert!(file_path.exists());
@@ -315,7 +315,7 @@ mod tests {
         let content = "Claude Code v1.0\nSession 1\n\nClaude Code v1.0\nTiny\n";
         fs::write(&file_path, content).unwrap();
 
-        let res = split_mega_file(&file_path, dir.path());
+        let res = split_mega_file(&file_path, dir.path(), 2);
         assert!(res.is_ok());
         // Should only have one file (Session 1), Tiny is too small (< 10 lines)
         // Actually, my lines count includes \n, so "Session 1" is also small here.
@@ -323,7 +323,7 @@ mod tests {
         let large_content =
             "Claude Code v1.0\n".to_string() + &"line\n".repeat(15) + "\nClaude Code v1.0\nTiny\n";
         fs::write(&file_path, large_content).unwrap();
-        split_mega_file(&file_path, dir.path()).unwrap();
+        split_mega_file(&file_path, dir.path(), 2).unwrap();
 
         let files: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
         // 1 backup + 1 split file = 2

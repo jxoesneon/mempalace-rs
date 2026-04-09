@@ -7,7 +7,6 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use walkdir::WalkDir;
 
 pub const READABLE_EXTENSIONS: &[&str] = &[
     ".txt", ".md", ".py", ".js", ".ts", ".jsx", ".tsx", ".json", ".yaml", ".yml", ".html", ".css",
@@ -136,17 +135,21 @@ pub fn detect_room(
     "general".to_string()
 }
 
-pub fn get_mineable_files(project_path: &Path) -> Vec<std::path::PathBuf> {
+pub fn get_mineable_files(project_path: &Path, no_gitignore: bool) -> Vec<std::path::PathBuf> {
+    use ignore::WalkBuilder;
     let mut files = Vec::new();
-    for entry in WalkDir::new(project_path)
-        .into_iter()
-        .filter_entry(|e| {
-            let name = e.file_name().to_string_lossy();
-            !SKIP_DIRS.contains(&name.as_ref())
-        })
-        .flatten()
-    {
+
+    let mut builder = WalkBuilder::new(project_path);
+    if no_gitignore {
+        builder.ignore(false).git_ignore(false).git_exclude(false);
+    }
+
+    for entry in builder.build().flatten() {
         let path = entry.path();
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        if SKIP_DIRS.contains(&name.as_ref()) {
+            continue;
+        }
         if path.is_file() {
             let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
             let ext_with_dot = format!(".{}", extension);
@@ -228,11 +231,20 @@ pub fn process_project_file(
     Some((room, ids, documents, metadatas))
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct MineOptions {
+    pub wing_override: Option<String>,
+    pub no_gitignore: bool,
+    pub agent: Option<String>,
+    pub limit: Option<usize>,
+    pub dry_run: bool,
+}
+
 pub async fn mine_project(
     dir: &str,
     storage: &Storage,
     config: &MempalaceConfig,
-    wing_override: Option<&str>,
+    options: MineOptions,
 ) -> Result<()> {
     let project_path_raw = Path::new(dir);
     if !project_path_raw.exists() || !project_path_raw.is_dir() {
@@ -243,12 +255,14 @@ pub async fn mine_project(
     }
     let project_path = project_path_raw.canonicalize()?;
 
-    let files = get_mineable_files(&project_path);
+    let files = get_mineable_files(&project_path, options.no_gitignore);
     if files.is_empty() {
         return Ok(());
     }
 
-    let wing_name = wing_override.unwrap_or("general").to_string();
+    let wing_name = options
+        .wing_override
+        .unwrap_or_else(|| "general".to_string());
     println!(
         "Mining project files in: {:?} into wing: {}",
         project_path, wing_name
@@ -275,7 +289,13 @@ pub async fn mine_project(
         config.config_dir.join("vectors.usearch"),
     )?;
 
+    let mut processed_files = 0;
     for path in files {
+        if let Some(l) = options.limit {
+            if processed_files >= l {
+                break;
+            }
+        }
         let source_file = path.to_string_lossy().to_string();
 
         // Skip if already filed
@@ -284,7 +304,7 @@ pub async fn mine_project(
         }
 
         if let Ok(content) = fs::read_to_string(&path) {
-            if let Some((room, _ids, documents, _metadatas)) = process_project_file(
+            if let Some((room, _ids, documents, metadatas)) = process_project_file(
                 &content,
                 &wing_name,
                 &source_file,
@@ -293,16 +313,34 @@ pub async fn mine_project(
                 &project_path,
             ) {
                 let mut count = 0usize;
-                for doc in &documents {
-                    vs.add_memory(doc, &wing_name, &room, Some(&source_file), None)?;
+                for (doc, mut meta) in documents.iter().zip(metadatas.into_iter()) {
+                    if let Some(agent_name) = &options.agent {
+                        meta.insert("author".to_string(), json!(agent_name));
+                    }
+                    if !options.dry_run {
+                        vs.add_memory(doc, &wing_name, &room, Some(&source_file), None)?;
+                    }
                     count += 1;
                 }
                 let filename = path.file_name().unwrap().to_string_lossy();
-                println!("  ✓ Filed {} drawers from {}", count, filename);
+                println!(
+                    "  ✓ {} {} drawers from {}",
+                    if options.dry_run {
+                        "[DRY RUN] Would file"
+                    } else {
+                        "Filed"
+                    },
+                    count,
+                    filename
+                );
             }
         }
+        processed_files += 1;
     }
-    vs.save_index(config.config_dir.join("vectors.usearch"))?;
+
+    if !options.dry_run {
+        vs.save_index(config.config_dir.join("vectors.usearch"))?;
+    }
 
     Ok(())
 }
@@ -519,7 +557,7 @@ mod tests {
         // Create valid file but with an extension that's not in the list
         fs::write(path.join("test.xyz"), "test").unwrap();
 
-        let files = get_mineable_files(path);
+        let files = get_mineable_files(path, false);
 
         assert_eq!(files.len(), 1);
         assert!(files[0].to_string_lossy().ends_with("test.rs"));
@@ -559,7 +597,13 @@ mod tests {
         let storage = Storage::new("test_mine.db").unwrap();
         let temp_config_dir = tempfile::tempdir().unwrap();
         let config = MempalaceConfig::new(Some(temp_config_dir.path().to_path_buf()));
-        let result = mine_project("/nonexistent/dir", &storage, &config, None).await;
+        let result = mine_project(
+            "/nonexistent/dir",
+            &storage,
+            &config,
+            MineOptions::default(),
+        )
+        .await;
         assert!(result.is_err());
         let _ = fs::remove_file("test_mine.db");
     }
@@ -572,7 +616,13 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         // Add a file to trigger the DB connection step
         fs::write(temp_dir.path().join("test.rs"), "A".repeat(100)).unwrap();
-        let result = mine_project(temp_dir.path().to_str().unwrap(), &storage, &config, None).await;
+        let result = mine_project(
+            temp_dir.path().to_str().unwrap(),
+            &storage,
+            &config,
+            MineOptions::default(),
+        )
+        .await;
         assert!(result.is_ok());
         let _ = fs::remove_file("test_mine_storage.db");
     }
@@ -586,7 +636,13 @@ mod tests {
         let file_path = temp_dir.path().join("main.rs");
         fs::write(&file_path, "A".repeat(100)).unwrap();
 
-        let result = mine_project(temp_dir.path().to_str().unwrap(), &storage, &config, None).await;
+        let result = mine_project(
+            temp_dir.path().to_str().unwrap(),
+            &storage,
+            &config,
+            MineOptions::default(),
+        )
+        .await;
         assert!(result.is_ok());
         let _ = fs::remove_file("test_mine_file.db");
     }
@@ -605,7 +661,7 @@ mod tests {
         fs::create_dir(path.join("target")).unwrap();
         fs::write(path.join("target").join("debug"), "").unwrap();
 
-        let files = get_mineable_files(path);
+        let files = get_mineable_files(path, false);
         assert_eq!(files.len(), 1);
         assert!(files[0].to_string_lossy().ends_with("main.rs"));
     }
@@ -616,12 +672,12 @@ mod tests {
         let path = temp_dir.path();
         fs::create_dir_all(path.join("a/b/c")).unwrap();
         fs::write(path.join("a/b/c/file.rs"), "").unwrap();
-        let files = get_mineable_files(path);
+        let files = get_mineable_files(path, false);
         assert_eq!(files.len(), 1);
 
         // No extension
         fs::write(path.join("LICENSE"), "").unwrap();
-        let files2 = get_mineable_files(path);
+        let files2 = get_mineable_files(path, false);
         assert_eq!(files2.len(), 1); // LICENSE should be skipped by extension check
     }
 

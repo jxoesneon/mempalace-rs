@@ -154,11 +154,19 @@ impl McpServer {
         Ok(json!({
             "protocolVersion": "2024-11-05",
             "capabilities": {
-                "tools": {}
+                "tools": {
+                    "listChanged": true
+                },
+                "resources": {
+                    "subscribe": true
+                },
+                "prompts": {
+                    "listChanged": true
+                }
             },
             "serverInfo": {
                 "name": "mempalace-rs",
-                "version": "0.1.0"
+                "version": env!("CARGO_PKG_VERSION")
             }
         }))
     }
@@ -167,17 +175,17 @@ impl McpServer {
         Ok(json!({
             "tools": [
                 {
-                    "name": "tool_status",
+                    "name": "mempalace_status",
                     "description": "Returns total drawers, wings, rooms, protocol, and AAAK spec.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
-                    "name": "tool_list_wings",
+                    "name": "mempalace_list_wings",
                     "description": "Returns all wings with counts.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
-                    "name": "tool_list_rooms",
+                    "name": "mempalace_list_rooms",
                     "description": "Returns rooms within a wing.",
                     "inputSchema": {
                         "type": "object",
@@ -188,12 +196,12 @@ impl McpServer {
                     }
                 },
                 {
-                    "name": "tool_get_taxonomy",
+                    "name": "mempalace_get_taxonomy",
                     "description": "Returns full wing -> room -> count tree.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
-                    "name": "tool_search",
+                    "name": "mempalace_search",
                     "description": "Semantic search.",
                     "inputSchema": {
                         "type": "object",
@@ -207,7 +215,7 @@ impl McpServer {
                     }
                 },
                 {
-                    "name": "tool_check_duplicate",
+                    "name": "mempalace_check_duplicate",
                     "description": "Similarity check.",
                     "inputSchema": {
                         "type": "object",
@@ -219,12 +227,12 @@ impl McpServer {
                     }
                 },
                 {
-                    "name": "tool_get_aaak_spec",
+                    "name": "mempalace_get_aaak_spec",
                     "description": "Returns the AAAK spec.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
-                    "name": "tool_traverse_graph",
+                    "name": "mempalace_traverse_graph",
                     "description": "Palace graph walk.",
                     "inputSchema": {
                         "type": "object",
@@ -236,17 +244,17 @@ impl McpServer {
                     }
                 },
                 {
-                    "name": "tool_find_tunnels",
+                    "name": "mempalace_find_tunnels",
                     "description": "Bridge rooms.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
-                    "name": "tool_graph_stats",
+                    "name": "mempalace_graph_stats",
                     "description": "Graph overview.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
-                    "name": "tool_add_drawer",
+                    "name": "mempalace_add_drawer",
                     "description": "File verbatim content.",
                     "inputSchema": {
                         "type": "object",
@@ -259,7 +267,7 @@ impl McpServer {
                     }
                 },
                 {
-                    "name": "tool_delete_drawer",
+                    "name": "mempalace_delete_drawer",
                     "description": "Remove drawer.",
                     "inputSchema": {
                         "type": "object",
@@ -270,7 +278,7 @@ impl McpServer {
                     }
                 },
                 {
-                    "name": "tool_kg_query",
+                    "name": "mempalace_kg_query",
                     "description": "KG access.",
                     "inputSchema": {
                         "type": "object",
@@ -282,7 +290,7 @@ impl McpServer {
                     }
                 },
                 {
-                    "name": "tool_kg_add",
+                    "name": "mempalace_kg_add",
                     "description": "Add triple to KG.",
                     "inputSchema": {
                         "type": "object",
@@ -295,7 +303,7 @@ impl McpServer {
                     }
                 },
                 {
-                    "name": "tool_kg_invalidate",
+                    "name": "mempalace_kg_invalidate",
                     "description": "Invalidate triple in KG.",
                     "inputSchema": {
                         "type": "object",
@@ -308,7 +316,7 @@ impl McpServer {
                     }
                 },
                 {
-                    "name": "tool_kg_timeline",
+                    "name": "mempalace_kg_timeline",
                     "description": "KG timeline.",
                     "inputSchema": {
                         "type": "object",
@@ -319,12 +327,12 @@ impl McpServer {
                     }
                 },
                 {
-                    "name": "tool_kg_stats",
+                    "name": "mempalace_kg_stats",
                     "description": "KG stats.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
-                    "name": "tool_diary_write",
+                    "name": "mempalace_diary_write",
                     "description": "Agent journal write.",
                     "inputSchema": {
                         "type": "object",
@@ -336,7 +344,7 @@ impl McpServer {
                     }
                 },
                 {
-                    "name": "tool_diary_read",
+                    "name": "mempalace_diary_read",
                     "description": "Agent journal read.",
                     "inputSchema": {
                         "type": "object",
@@ -348,7 +356,7 @@ impl McpServer {
                     }
                 },
                 {
-                    "name": "tool_prune",
+                    "name": "mempalace_prune",
                     "description": "Semantic deduplication. Finds and merges similar memories.",
                     "inputSchema": {
                         "type": "object",
@@ -371,31 +379,31 @@ impl McpServer {
         let args = &params["arguments"];
 
         match name {
-            "tool_status" => self.tool_status().await,
-            "tool_list_wings" => self.tool_list_wings().await,
-            "tool_list_rooms" => self.tool_list_rooms(args).await,
-            "tool_get_taxonomy" => self.tool_get_taxonomy().await,
-            "tool_search" => self.tool_search(args).await,
-            "tool_check_duplicate" => self.tool_check_duplicate(args).await,
-            "tool_get_aaak_spec" => self.tool_get_aaak_spec().await,
-            "tool_traverse_graph" => self.tool_traverse_graph(args).await,
-            "tool_find_tunnels" => self.tool_find_tunnels().await,
-            "tool_graph_stats" => self.tool_graph_stats().await,
-            "tool_add_drawer" => self.tool_add_drawer(args).await,
-            "tool_delete_drawer" => self.tool_delete_drawer(args).await,
-            "tool_kg_query" => self.tool_kg_query(args).await,
-            "tool_kg_add" => self.tool_kg_add(args).await,
-            "tool_kg_invalidate" => self.tool_kg_invalidate(args).await,
-            "tool_kg_timeline" => self.tool_kg_timeline(args).await,
-            "tool_kg_stats" => self.tool_kg_stats().await,
-            "tool_diary_write" => self.tool_diary_write(args).await,
-            "tool_diary_read" => self.tool_diary_read(args).await,
-            "tool_prune" => self.tool_prune(args).await,
+            "mempalace_status" => self.mempalace_status().await,
+            "mempalace_list_wings" => self.mempalace_list_wings().await,
+            "mempalace_list_rooms" => self.mempalace_list_rooms(args).await,
+            "mempalace_get_taxonomy" => self.mempalace_get_taxonomy().await,
+            "mempalace_search" => self.mempalace_search(args).await,
+            "mempalace_check_duplicate" => self.mempalace_check_duplicate(args).await,
+            "mempalace_get_aaak_spec" => self.mempalace_get_aaak_spec().await,
+            "mempalace_traverse_graph" => self.mempalace_traverse_graph(args).await,
+            "mempalace_find_tunnels" => self.mempalace_find_tunnels().await,
+            "mempalace_graph_stats" => self.mempalace_graph_stats().await,
+            "mempalace_add_drawer" => self.mempalace_add_drawer(args).await,
+            "mempalace_delete_drawer" => self.mempalace_delete_drawer(args).await,
+            "mempalace_kg_query" => self.mempalace_kg_query(args).await,
+            "mempalace_kg_add" => self.mempalace_kg_add(args).await,
+            "mempalace_kg_invalidate" => self.mempalace_kg_invalidate(args).await,
+            "mempalace_kg_timeline" => self.mempalace_kg_timeline(args).await,
+            "mempalace_kg_stats" => self.mempalace_kg_stats().await,
+            "mempalace_diary_write" => self.mempalace_diary_write(args).await,
+            "mempalace_diary_read" => self.mempalace_diary_read(args).await,
+            "mempalace_prune" => self.mempalace_prune(args).await,
             _ => Err(anyhow!("Unknown tool: {}", name)),
         }
     }
 
-    pub(crate) async fn tool_status(&self) -> Result<Value> {
+    pub(crate) async fn mempalace_status(&self) -> Result<Value> {
         let count = VectorStorage::new(
             self.config.config_dir.join("vectors.db"),
             self.config.config_dir.join("vectors.usearch"),
@@ -413,7 +421,7 @@ impl McpServer {
         }))
     }
 
-    pub(crate) async fn tool_list_wings(&self) -> Result<Value> {
+    pub(crate) async fn mempalace_list_wings(&self) -> Result<Value> {
         let mut wings = HashMap::new();
         for (wing, rooms) in &self.pg.wings {
             wings.insert(wing.clone(), rooms.len());
@@ -421,7 +429,7 @@ impl McpServer {
         Ok(json!({ "wings": wings }))
     }
 
-    pub(crate) async fn tool_list_rooms(&self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_list_rooms(&self, args: &Value) -> Result<Value> {
         let wing = args["wing"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing wing"))?;
@@ -429,7 +437,7 @@ impl McpServer {
         Ok(json!({ "wing": wing, "rooms": rooms }))
     }
 
-    pub(crate) async fn tool_get_taxonomy(&self) -> Result<Value> {
+    pub(crate) async fn mempalace_get_taxonomy(&self) -> Result<Value> {
         let mut taxonomy = HashMap::new();
         for (wing, rooms) in &self.pg.wings {
             let mut room_counts = HashMap::new();
@@ -441,7 +449,7 @@ impl McpServer {
         Ok(json!({ "taxonomy": taxonomy }))
     }
 
-    pub(crate) async fn tool_search(&self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_search(&self, args: &Value) -> Result<Value> {
         let query = args["query"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing query"))?;
@@ -456,7 +464,7 @@ impl McpServer {
         Ok(results)
     }
 
-    pub(crate) async fn tool_check_duplicate(&self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_check_duplicate(&self, args: &Value) -> Result<Value> {
         let text = args["text"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing text"))?;
@@ -482,7 +490,7 @@ impl McpServer {
         }))
     }
 
-    pub(crate) async fn tool_get_aaak_spec(&self) -> Result<Value> {
+    pub(crate) async fn mempalace_get_aaak_spec(&self) -> Result<Value> {
         Ok(json!({
             "spec": "AAAK Dialect V:3.2",
             "version": crate::dialect::AAAK_VERSION,
@@ -505,7 +513,7 @@ impl McpServer {
         }))
     }
 
-    pub(crate) async fn tool_traverse_graph(&self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_traverse_graph(&self, args: &Value) -> Result<Value> {
         let start_room = args["start_room"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing start_room"))?;
@@ -515,12 +523,12 @@ impl McpServer {
         Ok(json!({ "start_room": start_room, "connected": connected }))
     }
 
-    pub(crate) async fn tool_find_tunnels(&self) -> Result<Value> {
+    pub(crate) async fn mempalace_find_tunnels(&self) -> Result<Value> {
         let tunnels = self.pg.find_tunnels();
         Ok(json!({ "tunnels": tunnels }))
     }
 
-    pub(crate) async fn tool_graph_stats(&self) -> Result<Value> {
+    pub(crate) async fn mempalace_graph_stats(&self) -> Result<Value> {
         Ok(json!({
             "total_rooms": self.pg.rooms.len(),
             "total_wings": self.pg.wings.len(),
@@ -528,7 +536,7 @@ impl McpServer {
         }))
     }
 
-    pub(crate) async fn tool_add_drawer(&mut self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_add_drawer(&mut self, args: &Value) -> Result<Value> {
         let content = args["content"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing content"))?;
@@ -546,7 +554,7 @@ impl McpServer {
         Ok(json!({ "status": "success", "memory_id": memory_id, "wing": wing, "room": room }))
     }
 
-    pub(crate) async fn tool_delete_drawer(&self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_delete_drawer(&self, args: &Value) -> Result<Value> {
         let memory_id = args["memory_id"]
             .as_i64()
             .ok_or_else(|| anyhow!("Missing or invalid memory_id (integer)"))?;
@@ -560,7 +568,7 @@ impl McpServer {
         Ok(json!({ "status": "success", "memory_id": memory_id }))
     }
 
-    pub(crate) async fn tool_kg_query(&self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_kg_query(&self, args: &Value) -> Result<Value> {
         let entity = args["entity"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing entity"))?;
@@ -570,7 +578,7 @@ impl McpServer {
         Ok(json!({ "results": results }))
     }
 
-    pub(crate) async fn tool_kg_add(&self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_kg_add(&self, args: &Value) -> Result<Value> {
         let sub = args["subject"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing subject"))?;
@@ -587,7 +595,7 @@ impl McpServer {
         Ok(json!({ "status": "success", "triple_id": id }))
     }
 
-    pub(crate) async fn tool_kg_invalidate(&self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_kg_invalidate(&self, args: &Value) -> Result<Value> {
         let sub = args["subject"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing subject"))?;
@@ -602,7 +610,7 @@ impl McpServer {
         Ok(json!({ "status": "success" }))
     }
 
-    pub(crate) async fn tool_kg_timeline(&self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_kg_timeline(&self, args: &Value) -> Result<Value> {
         let entity = args["entity"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing entity"))?;
@@ -619,12 +627,12 @@ impl McpServer {
         Ok(json!({ "entity": entity, "timeline": sorted }))
     }
 
-    pub(crate) async fn tool_kg_stats(&self) -> Result<Value> {
+    pub(crate) async fn mempalace_kg_stats(&self) -> Result<Value> {
         let stats = self.kg.stats()?;
         Ok(stats)
     }
 
-    pub(crate) async fn tool_diary_write(&self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_diary_write(&self, args: &Value) -> Result<Value> {
         let agent = args["agent"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing agent"))?;
@@ -636,7 +644,7 @@ impl McpServer {
         Ok(json!({ "status": "success" }))
     }
 
-    pub(crate) async fn tool_diary_read(&self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_diary_read(&self, args: &Value) -> Result<Value> {
         let agent = args["agent"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing agent"))?;
@@ -646,7 +654,7 @@ impl McpServer {
         Ok(json!({ "entries": entries }))
     }
 
-    pub(crate) async fn tool_prune(&self, args: &Value) -> Result<Value> {
+    pub(crate) async fn mempalace_prune(&self, args: &Value) -> Result<Value> {
         let threshold = args["threshold"].as_f64().unwrap_or(0.85) as f32;
         let dry_run = args["dry_run"].as_bool().unwrap_or(true);
         let wing = args["wing"].as_str().map(|s| s.to_string());
@@ -700,66 +708,66 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mcp_tool_list_wings() {
+    async fn test_mcp_mempalace_list_wings() {
         let (config, _td) = setup_test();
         let mut server = McpServer::new_test(config);
         server.pg.add_room("room1", "wing1");
 
-        let res = server.tool_list_wings().await.unwrap();
+        let res = server.mempalace_list_wings().await.unwrap();
         assert_eq!(res["wings"]["wing1"], 1);
     }
 
     #[tokio::test]
-    async fn test_mcp_tool_list_rooms() {
+    async fn test_mcp_mempalace_list_rooms() {
         let (config, _td) = setup_test();
         let mut server = McpServer::new_test(config);
         server.pg.add_room("room1", "wing1");
 
         let args = json!({ "wing": "wing1" });
-        let res = server.tool_list_rooms(&args).await.unwrap();
+        let res = server.mempalace_list_rooms(&args).await.unwrap();
         let rooms = res["rooms"].as_array().unwrap();
         assert_eq!(rooms[0], "room1");
     }
 
     #[tokio::test]
-    async fn test_mcp_tool_get_taxonomy() {
+    async fn test_mcp_mempalace_get_taxonomy() {
         let (config, _td) = setup_test();
         let mut server = McpServer::new_test(config);
         server.pg.add_room("room1", "wing1");
 
-        let res = server.tool_get_taxonomy().await.unwrap();
+        let res = server.mempalace_get_taxonomy().await.unwrap();
         assert!(res["taxonomy"]["wing1"].is_object());
     }
 
     #[tokio::test]
-    async fn test_mcp_tool_graph_stats() {
+    async fn test_mcp_mempalace_graph_stats() {
         let (config, _td) = setup_test();
         let mut server = McpServer::new_test(config);
         server.pg.add_room("room1", "wing1");
 
-        let res = server.tool_graph_stats().await.unwrap();
+        let res = server.mempalace_graph_stats().await.unwrap();
         assert_eq!(res["total_rooms"], 1);
         assert_eq!(res["total_wings"], 1);
     }
 
     #[tokio::test]
-    async fn test_mcp_tool_get_aaak_spec() {
+    async fn test_mcp_mempalace_get_aaak_spec() {
         let (config, _td) = setup_test();
         let server = McpServer::new_test(config);
-        let res = server.tool_get_aaak_spec().await.unwrap();
+        let res = server.mempalace_get_aaak_spec().await.unwrap();
         assert!(res["spec"].as_str().unwrap().contains("AAAK Dialect"));
     }
 
     #[tokio::test]
-    async fn test_mcp_tool_diary_ops() {
+    async fn test_mcp_mempalace_diary_ops() {
         let (config, _td) = setup_test();
         let server = McpServer::new_test(config);
 
         let write_args = json!({ "agent": "test-agent", "content": "test diary entry" });
-        server.tool_diary_write(&write_args).await.unwrap();
+        server.mempalace_diary_write(&write_args).await.unwrap();
 
         let read_args = json!({ "agent": "test-agent", "last_n": 1 });
-        let res = server.tool_diary_read(&read_args).await.unwrap();
+        let res = server.mempalace_diary_read(&read_args).await.unwrap();
         let entries = res["entries"].as_array().unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0]["content"], "test diary entry");

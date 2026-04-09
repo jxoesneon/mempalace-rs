@@ -40,9 +40,33 @@ enum Commands {
         mode: Option<String>,
         #[arg(short, long, help = "Wing to tag with")]
         wing: Option<String>,
+        #[arg(long, help = "Disable gitignore filtering")]
+        no_gitignore: bool,
+        #[arg(long, help = "Pass paths that bypass the filter")]
+        include_ignored: bool,
+        #[arg(short, long, help = "Override the author metadata")]
+        agent: Option<String>,
+        #[arg(short, long, help = "Stop mining after N files")]
+        limit: Option<usize>,
+        #[arg(long, help = "Log to stdout instead of writing to storage")]
+        dry_run: bool,
     },
     #[command(about = "Find anything, exact words")]
-    Search { query: String },
+    Search {
+        query: String,
+        #[arg(short, long, help = "Filter by wing")]
+        wing: Option<String>,
+        #[arg(short, long, help = "Filter by room")]
+        room: Option<String>,
+        #[arg(short, long, help = "Number of results", default_value_t = 5)]
+        results: usize,
+    },
+    #[command(
+        about = "Iterate over all entries in palace.db and re-index them into vector storage"
+    )]
+    Repair,
+    #[command(about = "Output system prompts for init, search, mine, and status")]
+    Instructions,
     #[command(about = "Compress drawers using AAAK Dialect (~30x reduction)")]
     Compress {
         #[arg(short, long)]
@@ -123,19 +147,62 @@ async fn run_app(cli: Cli) -> Result<()> {
         Commands::Init { dir: _ } => {
             mempalace_rs::onboarding::run_onboarding()?;
         }
-        Commands::Mine { dir, mode, wing } => {
+        Commands::Mine {
+            dir,
+            mode,
+            wing,
+            no_gitignore,
+            include_ignored: _,
+            agent,
+            limit,
+            dry_run,
+        } => {
             let m = mode.unwrap_or_else(|| "project".to_string());
             if m == "convos" {
                 mempalace_rs::convo_miner::mine_convos(&dir, &storage, &config, wing.as_deref())
                     .await?;
             } else {
-                mempalace_rs::miner::mine_project(&dir, &storage, &config, wing.as_deref()).await?;
+                let options = mempalace_rs::miner::MineOptions {
+                    wing_override: wing,
+                    no_gitignore,
+                    agent,
+                    limit,
+                    dry_run,
+                };
+                mempalace_rs::miner::mine_project(&dir, &storage, &config, options).await?;
             }
             println!("  ✓ Successfully mined {} in {} mode", dir, m);
         }
-        Commands::Search { query } => {
-            let result = searcher.search(&query, None, None, 5).await?;
+        Commands::Search {
+            query,
+            wing,
+            room,
+            results,
+        } => {
+            let result = searcher.search(&query, wing, room, results).await?;
             println!("{}", result);
+        }
+        Commands::Repair => {
+            storage.repair(&config).await?;
+        }
+        Commands::Instructions => {
+            let instructions = r#"
+System Prompts for AI Agents
+============================
+
+INIT:
+You are an AI with a structured memory palace. Use `mempalace_init` or `mempalace_add_drawer` to store critical information you need to remember across sessions.
+
+SEARCH:
+Use `mempalace_search` to query your temporal knowledge graph and vector database. Rely on exact keywords when possible.
+
+MINE:
+To ingest large codebases or transcripts, trigger `mempalace mine <DIR>`.
+
+STATUS:
+Call `mempalace_status` periodically to understand your context window budget and the current AAAK compression ratio.
+            "#;
+            println!("{}", instructions.trim());
         }
         Commands::Compress { wing } => {
             storage.compress_drawers(&config, wing).await?;
@@ -150,6 +217,7 @@ async fn run_app(cli: Cli) -> Result<()> {
                 mempalace_rs::split_mega_files::split_mega_file(
                     path,
                     path.parent().unwrap_or(path),
+                    2,
                 )?;
                 println!("  ✓ Successfully split {}", dir);
             } else if path.is_dir() {
@@ -158,7 +226,7 @@ async fn run_app(cli: Cli) -> Result<()> {
                     let entry = entry?;
                     let p = entry.path();
                     if p.is_file()
-                        && mempalace_rs::split_mega_files::split_mega_file(&p, path).is_ok()
+                        && mempalace_rs::split_mega_files::split_mega_file(&p, path, 2).is_ok()
                     {
                         count += 1;
                     }

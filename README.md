@@ -178,8 +178,10 @@ WING|ROOM|DATE|SOURCE
 | Command          | Description                                 |
 | ---------------- | ------------------------------------------- |
 | `init <dir>`     | Guided onboarding with room detection       |
-| `mine <dir>`     | Ingest projects or conversations            |
-| `search <query>` | Semantic search over ingested data          |
+| `mine <dir>`     | Ingest projects or conversations (supports `--limit`, `--dry-run`, `--no-gitignore`) |
+| `search <query>` | Semantic search over ingested data (supports `--wing`, `--room`, `--results`) |
+| `repair`         | Recover/re-index vector storage from SQLite metadata |
+| `instructions`   | Output system prompts for AI agent onboarding |
 | `wakeup`         | Get L0+L1 context (~600-900 tokens)         |
 | `compress`       | AAAK compress drawers                       |
 | `split <dir>`    | Split mega-files into per-session files     |
@@ -188,45 +190,45 @@ WING|ROOM|DATE|SOURCE
 
 ## MCP Tools
 
-The project exposes 20 tools via Model Context Protocol:
+The project exposes 20 tools via Model Context Protocol (all prefixed with `mempalace_`):
 
 ### Palace Overview
 
-- `tool_status` - Returns total drawers, wings, rooms, protocol, AAAK spec
-- `tool_list_wings` - Returns all wings with counts
-- `tool_list_rooms` - Returns rooms within a wing
-- `tool_get_taxonomy` - Returns full wing → room → count tree
-- `tool_graph_stats` - Graph overview
+- `mempalace_status` - Returns total drawers, wings, rooms, protocol, and AAAK spec
+- `mempalace_list_wings` - Returns all wings with counts
+- `mempalace_list_rooms` - Returns rooms within a wing
+- `mempalace_get_taxonomy` - Returns full wing → room → count tree
+- `mempalace_graph_stats` - Graph overview
 
 ### Search & Retrieval
 
-- `tool_search` - Semantic search with wing/room filters
-- `tool_check_duplicate` - Similarity check for deduplication
-- `tool_prune` - Semantic memory pruning and merging
+- `mempalace_search` - Semantic search with wing/room filters
+- `mempalace_check_duplicate` - Similarity check for deduplication
+- `mempalace_prune` - Semantic memory pruning and merging
 
 ### Graph Navigation
 
-- `tool_traverse_graph` - BFS walk from start_room
-- `tool_find_tunnels` - Find bridge rooms
+- `mempalace_traverse_graph` - BFS walk from start_room
+- `mempalace_find_tunnels` - Find bridge rooms
 
 ### Content Management
 
-- `tool_add_drawer` - Add verbatim content
-- `tool_delete_drawer` - Remove drawer by ID
-- `tool_get_aaak_spec` - Returns AAAK spec
+- `mempalace_add_drawer` - Add verbatim content
+- `mempalace_delete_drawer` - Remove drawer by ID
+- `mempalace_get_aaak_spec` - Returns AAAK spec
 
 ### Knowledge Graph
 
-- `tool_kg_add` - Add triple (subject, predicate, object)
-- `tool_kg_query` - Query entity relationships
-- `tool_kg_invalidate` - Mark triple as invalid
-- `tool_kg_timeline` - Get chronological timeline
-- `tool_kg_stats` - KG statistics
+- `mempalace_kg_add` - Add triple (subject, predicate, object)
+- `mempalace_kg_query` - Query entity relationships
+- `mempalace_kg_invalidate` - Mark triple as invalid
+- `mempalace_kg_timeline` - Get chronological timeline
+- `mempalace_kg_stats` - KG statistics
 
 ### Agent Diary
 
-- `tool_diary_write` - Persist agent journal entry
-- `tool_diary_read` - Retrieve last N diary entries
+- `mempalace_diary_write` - Persist agent journal entry
+- `mempalace_diary_read` - Retrieve last N diary entries
 
 ## Project Structure
 

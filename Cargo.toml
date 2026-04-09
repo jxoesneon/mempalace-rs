@@ -46,6 +46,7 @@ lazy_static = "1.5.0"
 # Pure-Rust storage engine dependencies (replaces ChromaDB)
 fastembed = "4"
 usearch = { version = "2", features = ["simsimd"] }
+ignore = "0.4.25"
 
 [[bin]]
 name = "update-benchmarks"

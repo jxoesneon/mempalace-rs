@@ -106,95 +106,6 @@ impl Layer1 {
         }
     }
 
-    pub fn format_generation(
-        docs: &[String],
-        metas: &[Option<serde_json::Map<String, serde_json::Value>>],
-    ) -> String {
-        if docs.is_empty() {
-            return "## L1 — No memories yet.".to_string();
-        }
-
-        let mut scored = Vec::new();
-        for (doc, meta) in docs.iter().zip(metas.iter()) {
-            let mut importance = 3.0;
-            if let Some(meta_map) = meta {
-                for key in &["importance", "emotional_weight", "weight"] {
-                    if let Some(val) = meta_map.get(*key) {
-                        if let Some(f) = val.as_f64() {
-                            importance = f;
-                            break;
-                        }
-                    }
-                }
-            }
-            scored.push((importance, meta, doc));
-        }
-
-        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-        let top = scored.into_iter().take(15);
-
-        let mut by_room: HashMap<String, Vec<_>> = HashMap::new();
-        for (imp, meta, doc) in top {
-            let room = meta
-                .as_ref()
-                .and_then(|m| m.get("room"))
-                .and_then(|v| v.as_str())
-                .unwrap_or("general")
-                .to_string();
-            by_room.entry(room).or_default().push((imp, meta, doc));
-        }
-
-        let mut lines = vec!["## L1 — ESSENTIAL STORY".to_string()];
-        let mut sorted_rooms: Vec<_> = by_room.keys().collect::<Vec<_>>();
-        sorted_rooms.sort();
-
-        let mut total_len = 0;
-        let max_chars = 3200;
-
-        for room in sorted_rooms {
-            let room_line = format!("\n[{}]", room);
-            lines.push(room_line.clone());
-            total_len += room_line.len();
-
-            if let Some(entries) = by_room.get(room) {
-                for (imp, meta, doc) in entries {
-                    let source = meta
-                        .as_ref()
-                        .and_then(|m| m.get("source_file"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
-                    let source_name = PathBuf::from(source)
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("")
-                        .to_string();
-
-                    let mut snippet = doc.trim().replace('\n', " ");
-                    if snippet.len() > 200 {
-                        snippet = format!("{}...", &snippet[..197]);
-                    }
-
-                    // Map importance (e.g. 5.0) to 0-9 weight
-                    let weight = (imp * 2.0).round().min(9.0) as u8;
-                    let mut entry_line = format!("  - WT:{}| {}", weight, snippet);
-                    if !source_name.is_empty() {
-                        entry_line = format!("{}  ({})", entry_line, source_name);
-                    }
-
-                    if total_len + entry_line.len() > max_chars {
-                        lines.push("  ... (more in L3 search)".to_string());
-                        return lines.join("\n");
-                    }
-
-                    lines.push(entry_line.clone());
-                    total_len += entry_line.len();
-                }
-            }
-        }
-
-        lines.join("\n")
-    }
-
     pub async fn generate(&self) -> String {
         let vs = match open_vector_storage(&self.config) {
             Ok(vs) => vs,
@@ -242,7 +153,8 @@ impl Layer1 {
                 Some(m)
             })
             .collect();
-        Self::format_generation(&docs, &metas)
+        let dialect = crate::dialect::Dialect::default();
+        dialect.generate_layer1(&docs, &metas)
     }
 }
 
@@ -563,9 +475,107 @@ impl MemoryStack {
     ) -> String {
         self.l3.search(query, wing, room, n_results).await
     }
+
+    pub async fn repair(&self, config: &MempalaceConfig) -> Result<()> {
+        let mut vs = open_vector_storage(config)?;
+
+        println!("  Rebuilding usearch index from SQLite metadata...");
+        let mut stmt = vs.db.prepare("SELECT id, text_content FROM memories")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let opts = usearch::IndexOptions {
+            dimensions: 384,
+            metric: usearch::MetricKind::Cos,
+            quantization: usearch::ScalarKind::F32,
+            connectivity: 16,
+            expansion_add: 128,
+            expansion_search: 64,
+            ..Default::default()
+        };
+        let new_index = usearch::Index::new(&opts)
+            .map_err(|e| anyhow!("usearch index creation failed: {e}"))?;
+
+        let mut count = 0;
+        for row in rows {
+            let (id, text) = row?;
+            let vector = vs.embed_single(&text)?;
+
+            let needed = new_index.size() + 1;
+            if needed > new_index.capacity() {
+                let new_cap = (needed * 2).max(64);
+                new_index
+                    .reserve(new_cap)
+                    .map_err(|e| anyhow!("usearch reserve failed: {e}"))?;
+            }
+            new_index
+                .add(id as u64, &vector)
+                .map_err(|e| anyhow!("usearch add failed: {e}"))?;
+            count += 1;
+        }
+
+        vs.index = new_index;
+        vs.save_index(config.config_dir.join("vectors.usearch"))?;
+
+        println!(
+            "  ✓ Successfully repaired and re-indexed {} memories.",
+            count
+        );
+        Ok(())
+    }
 }
 
 impl Storage {
+    pub async fn repair(&self, config: &MempalaceConfig) -> Result<()> {
+        let mut vs = open_vector_storage(config)?;
+
+        println!("  Rebuilding usearch index from SQLite metadata...");
+        let mut stmt = vs.db.prepare("SELECT id, text_content FROM memories")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let opts = usearch::IndexOptions {
+            dimensions: 384,
+            metric: usearch::MetricKind::Cos,
+            quantization: usearch::ScalarKind::F32,
+            connectivity: 16,
+            expansion_add: 128,
+            expansion_search: 64,
+            ..Default::default()
+        };
+        let new_index = usearch::Index::new(&opts)
+            .map_err(|e| anyhow!("usearch index creation failed: {e}"))?;
+
+        let mut count = 0;
+        for row in rows {
+            let (id, text) = row?;
+            let vector = vs.embed_single(&text)?;
+
+            let needed = new_index.size() + 1;
+            if needed > new_index.capacity() {
+                let new_cap = (needed * 2).max(64);
+                new_index
+                    .reserve(new_cap)
+                    .map_err(|e| anyhow!("usearch reserve failed: {e}"))?;
+            }
+            new_index
+                .add(id as u64, &vector)
+                .map_err(|e| anyhow!("usearch add failed: {e}"))?;
+            count += 1;
+        }
+
+        vs.index = new_index;
+        vs.save_index(config.config_dir.join("vectors.usearch"))?;
+
+        println!(
+            "  ✓ Successfully repaired and re-indexed {} memories.",
+            count
+        );
+        Ok(())
+    }
+
     pub fn new(path: &str) -> SqlResult<Self> {
         // Create parent directory if it doesn't exist (for non-memory databases)
         if path != ":memory:" {

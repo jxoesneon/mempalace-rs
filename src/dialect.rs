@@ -1064,6 +1064,68 @@ impl Dialect {
             new_aaak
         }
     }
+
+    pub fn generate_layer1(
+        &self,
+        docs: &[String],
+        metas: &[Option<serde_json::Map<String, serde_json::Value>>],
+    ) -> String {
+        if docs.is_empty() {
+            return "## L1 — No memories yet.".to_string();
+        }
+
+        let mut scored = Vec::new();
+        for (doc, meta) in docs.iter().zip(metas.iter()) {
+            let mut importance = 3.0;
+            if let Some(meta_map) = meta {
+                for key in &["importance", "emotional_weight", "weight"] {
+                    if let Some(val) = meta_map.get(*key) {
+                        if let Some(f) = val.as_f64() {
+                            importance = f;
+                            break;
+                        }
+                    }
+                }
+            }
+            // Density-aware: shorter docs with high importance get a slight boost
+            let density_boost = if !doc.is_empty() {
+                100.0 / doc.len() as f64
+            } else {
+                0.0
+            };
+            importance += density_boost * 0.1;
+
+            scored.push((importance, meta, doc));
+        }
+
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+        let top = scored.into_iter().take(15);
+
+        let mut by_room: HashMap<String, Vec<_>> = HashMap::new();
+        for (imp, meta, doc) in top {
+            let room = meta
+                .as_ref()
+                .and_then(|m| m.get("room"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("general")
+                .to_string();
+            by_room.entry(room).or_default().push((imp, meta, doc));
+        }
+
+        let mut lines = vec!["## L1 — ESSENTIAL STORY".to_string()];
+        let mut sorted_rooms: Vec<_> = by_room.keys().cloned().collect::<Vec<_>>();
+        sorted_rooms.sort();
+
+        for room in sorted_rooms {
+            lines.push(format!("### {}", room.to_uppercase()));
+            let room_docs = by_room.get(&room).unwrap();
+            for (_, _, doc) in room_docs {
+                lines.push(doc.to_string());
+            }
+        }
+
+        lines.join("\n")
+    }
 }
 
 pub struct AAAKContext;

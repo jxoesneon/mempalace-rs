@@ -144,6 +144,38 @@ fn generate_aaak_code(name: &str) -> String {
     }
 }
 
+pub fn confirm_entities(detected: Vec<DetectedEntity>) -> Result<Vec<DetectedEntity>> {
+    if detected.is_empty() {
+        return Ok(detected);
+    }
+
+    let theme = ColorfulTheme::default();
+    println!("\nMemPalace detected potential entities in your files.");
+
+    let items: Vec<String> = detected
+        .iter()
+        .map(|e| {
+            format!(
+                "{} ({:?}) - Confidence: {:.2}",
+                e.name, e.r#type, e.confidence
+            )
+        })
+        .collect();
+
+    let selections = dialoguer::MultiSelect::with_theme(&theme)
+        .with_prompt(
+            "Select entities to track in your AAAK dictionary (Space to select, Enter to confirm)",
+        )
+        .items(&items)
+        .interact()?;
+
+    let confirmed = selections
+        .into_iter()
+        .map(|i| detected[i].clone())
+        .collect();
+    Ok(confirmed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
