@@ -77,9 +77,9 @@ _Verified multi-hop reasoning, 1M+ token persistence, and structural integrity._
 <!-- GOLD_STANDARD_START -->
 | Benchmark | Score | Metric | Latency |
 |-----------|-------|--------|---------|
-| **RULER     ** | 1.000 | nDCG       | 134.0 ms |
-| **STRUCTMEM ** | 1.000 | Structural | 36.0 ms |
-| **BABILONG  ** | 1.000 | Reasoning  | 530.0 ms |
+| **RULER     ** | 1.000 | nDCG       | 220.0 ms |
+| **STRUCTMEM ** | 1.000 | Structural | 34.0 ms |
+| **BABILONG  ** | 1.000 | Reasoning  | 544.0 ms |
 | **BEAM      ** | 1.000 | Nugget     | 24.0 ms |
 <!-- GOLD_STANDARD_END -->
 
