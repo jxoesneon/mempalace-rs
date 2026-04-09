@@ -38,6 +38,9 @@ jobs:
             ~/.cargo/git
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev ca-certificates
+
       - name: Build Release
         run: cargo build --release --verbose
 
