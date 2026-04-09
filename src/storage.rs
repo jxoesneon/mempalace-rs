@@ -781,8 +781,9 @@ mod tests {
 
     #[test]
     fn test_layer1_format_generation_empty() {
+        let dialect = crate::dialect::Dialect::default();
         assert_eq!(
-            Layer1::format_generation(&[], &[]),
+            dialect.generate_layer1(&[], &[]),
             "## L1 — No memories yet."
         );
     }
@@ -820,10 +821,11 @@ mod tests {
 
         let metas = vec![Some(m1), Some(m2)];
 
-        let res = Layer1::format_generation(&docs, &metas);
+        let dialect = crate::dialect::Dialect::default();
+        let res = dialect.generate_layer1(&docs, &metas);
         assert!(res.contains("## L1 — ESSENTIAL STORY"));
-        assert!(res.contains("[arch]"));
-        assert!(res.contains("[general]"));
+        assert!(res.contains("### ARCH"));
+        assert!(res.contains("### GENERAL"));
         assert!(res.contains("Important architectural decision..."));
         assert!(res.contains("arch.md"));
         assert!(res.contains("A very long document...")); // Should contain truncated version
@@ -840,7 +842,8 @@ mod tests {
         );
         let metas = vec![Some(m1); 20];
 
-        let res = Layer1::format_generation(&docs, &metas);
+        let dialect = crate::dialect::Dialect::default();
+        let res = dialect.generate_layer1(&docs, &metas);
         assert!(res.contains("... (more in L3 search)"));
     }
 
@@ -1111,7 +1114,8 @@ mod tests {
     fn test_layer1_format_generation_single() {
         let docs = vec!["single".to_string(), "  ".to_string()];
         let metas = vec![None, None];
-        let output = Layer1::format_generation(&docs, &metas);
+        let dialect = crate::dialect::Dialect::default();
+        let output = dialect.generate_layer1(&docs, &metas);
         assert!(output.contains("single"));
     }
 
@@ -1137,7 +1141,8 @@ mod tests {
             ),
             None,
         ];
-        let output = Layer1::format_generation(&docs, &metas);
+        let dialect = crate::dialect::Dialect::default();
+        let output = dialect.generate_layer1(&docs, &metas);
         assert!(output.contains("weight_test"));
         assert!(output.contains("emotional_test"));
         assert!(output.contains("long_test"));

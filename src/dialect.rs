@@ -1116,11 +1116,44 @@ impl Dialect {
         let mut sorted_rooms: Vec<_> = by_room.keys().cloned().collect::<Vec<_>>();
         sorted_rooms.sort();
 
+        let mut total_len = 0;
+        let max_chars = 3200;
+
         for room in sorted_rooms {
-            lines.push(format!("### {}", room.to_uppercase()));
+            let room_header = format!("### {}", room.to_uppercase());
+            lines.push(room_header.clone());
+            total_len += room_header.len();
+
             let room_docs = by_room.get(&room).unwrap();
-            for (_, _, doc) in room_docs {
-                lines.push(doc.to_string());
+            for (imp, meta, doc) in room_docs {
+                let mut snippet = doc.trim().replace('\n', " ");
+                if snippet.len() > 200 {
+                    snippet = format!("{}...", &snippet[..197]);
+                }
+
+                // Map importance (e.g. 5.0) to 0-9 weight
+                let weight = (imp * 2.0).round().min(9.0) as u8;
+                let mut entry_line = format!("  - WT:{}| {}", weight, snippet);
+
+                if let Some(meta_map) = meta {
+                    if let Some(sf) = meta_map.get("source_file").and_then(|v| v.as_str()) {
+                        let source_name = std::path::Path::new(sf)
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("");
+                        if !source_name.is_empty() {
+                            entry_line = format!("{}  ({})", entry_line, source_name);
+                        }
+                    }
+                }
+
+                if total_len + entry_line.len() > max_chars {
+                    lines.push("  ... (more in L3 search)".to_string());
+                    return lines.join("\n");
+                }
+
+                lines.push(entry_line.clone());
+                total_len += entry_line.len();
             }
         }
 
