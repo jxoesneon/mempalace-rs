@@ -19,7 +19,7 @@ include = [
 ]
 
 [features]
-default = ["simsimd", "fp16lib"] # SimSIMD is enabled by default
+default = ["fp16lib"] # SimSIMD disabled to avoid C++ compilation issues
 simsimd = []                     # No need to do anything to enable SimSIMD by default
 fp16lib = []                     # Without this FP16 we lose precision downcasting
 openmp = []                      # Optional: Users can enable OpenMP

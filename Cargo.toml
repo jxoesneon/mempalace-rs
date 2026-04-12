@@ -47,7 +47,7 @@ hex = "0.4.3"
 
 # Pure-Rust storage engine dependencies (replaces ChromaDB)
 fastembed = "4"
-usearch = { version = "2", features = ["simsimd"] }
+usearch = "2"
 ignore = "0.4.25"
 
 [[bin]]
