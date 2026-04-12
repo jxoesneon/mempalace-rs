@@ -29,10 +29,10 @@ name = "usearch"
 path = "rust/lib.rs"
 
 [dependencies]
-cxx = "1.0.160"
+cxx = "1.0.194"
 
 [build-dependencies]
-cxx-build = "1.0.160"
+cxx-build = "1.0.194"
 
 [dev-dependencies]
 fork_union = "2.1.1"  # for concurrency tests
