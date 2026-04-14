@@ -209,7 +209,10 @@ impl EntityRegistry {
         let mut registry = Self {
             path,
             data: RegistryData::empty(),
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_default(),
         };
 
         let _ = registry.load();
