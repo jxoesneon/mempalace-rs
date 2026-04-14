@@ -2226,6 +2226,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "sha2",
  "symspell",
  "tempfile",
  "tokio",

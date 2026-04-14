@@ -198,7 +198,7 @@ pub struct EntityRegistry {
 }
 
 impl EntityRegistry {
-    pub fn new(path: Option<PathBuf>) -> Self {
+    pub fn new(path: Option<PathBuf>) -> Result<Self> {
         let path = path.unwrap_or_else(|| {
             let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
             PathBuf::from(home)
@@ -206,14 +206,18 @@ impl EntityRegistry {
                 .join("entity_registry.json")
         });
 
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()?;
+
         let mut registry = Self {
             path,
             data: RegistryData::empty(),
-            client: Client::new(),
+            client,
         };
 
         let _ = registry.load();
-        registry
+        Ok(registry)
     }
 
     pub fn load(&mut self) -> Result<()> {
@@ -480,7 +484,7 @@ mod tests {
     fn test_registration_and_persistence() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("entity_registry.json");
-        let mut registry = EntityRegistry::new(Some(path.clone()));
+        let mut registry = EntityRegistry::new(Some(path.clone())).unwrap();
 
         let entity = DetectedEntity {
             name: "Riley".to_string(),
@@ -500,7 +504,7 @@ mod tests {
             .contains(&"Ry".to_string()));
 
         // Test persistence
-        let registry2 = EntityRegistry::new(Some(path));
+        let registry2 = EntityRegistry::new(Some(path)).unwrap();
         assert!(registry2.data.people.contains_key("Riley"));
         assert_eq!(registry2.data.people["Riley"].relationship, "daughter");
     }
@@ -509,7 +513,7 @@ mod tests {
     fn test_alias_resolution() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("entity_registry.json");
-        let mut registry = EntityRegistry::new(Some(path));
+        let mut registry = EntityRegistry::new(Some(path)).unwrap();
 
         let entity = DetectedEntity {
             name: "Maxwell".to_string(),
@@ -537,7 +541,7 @@ mod tests {
     fn test_disambiguation() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("entity_registry.json");
-        let mut registry = EntityRegistry::new(Some(path));
+        let mut registry = EntityRegistry::new(Some(path)).unwrap();
 
         // "Grace" is a common word
         let entity = DetectedEntity {

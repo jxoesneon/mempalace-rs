@@ -47,7 +47,7 @@ pub fn run_onboarding() -> Result<()> {
 
     println!("Great! Bootstrapping your memory...");
 
-    let mut registry = EntityRegistry::new(None);
+    let mut registry = EntityRegistry::new(None)?;
     registry.data.mode = mode;
 
     for person in &people {

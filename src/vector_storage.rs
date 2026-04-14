@@ -426,22 +426,23 @@ impl VectorStorage {
         room: Option<&str>,
         limit: usize,
     ) -> Result<Vec<MemoryRecord>> {
+        let capped_limit = limit.min(10_000) as i64;
         let (sql, params_dyn): (String, Vec<Box<dyn rusqlite::ToSql>>) = match (wing, room) {
             (Some(w), Some(r)) => (
-                format!("SELECT id, text_content, wing, room, source_file, valid_from, valid_to, last_accessed, access_count, importance_score FROM memories WHERE wing = ?1 AND room = ?2 ORDER BY valid_from DESC LIMIT {limit}"),
-                vec![Box::new(w.to_string()), Box::new(r.to_string())],
+                "SELECT id, text_content, wing, room, source_file, valid_from, valid_to, last_accessed, access_count, importance_score FROM memories WHERE wing = ?1 AND room = ?2 ORDER BY valid_from DESC LIMIT ?3".to_string(),
+                vec![Box::new(w.to_string()) as Box<dyn rusqlite::ToSql>, Box::new(r.to_string()), Box::new(capped_limit)],
             ),
             (Some(w), None) => (
-                format!("SELECT id, text_content, wing, room, source_file, valid_from, valid_to, last_accessed, access_count, importance_score FROM memories WHERE wing = ?1 ORDER BY valid_from DESC LIMIT {limit}"),
-                vec![Box::new(w.to_string())],
+                "SELECT id, text_content, wing, room, source_file, valid_from, valid_to, last_accessed, access_count, importance_score FROM memories WHERE wing = ?1 ORDER BY valid_from DESC LIMIT ?2".to_string(),
+                vec![Box::new(w.to_string()) as Box<dyn rusqlite::ToSql>, Box::new(capped_limit)],
             ),
             (None, Some(r)) => (
-                format!("SELECT id, text_content, wing, room, source_file, valid_from, valid_to, last_accessed, access_count, importance_score FROM memories WHERE room = ?1 ORDER BY valid_from DESC LIMIT {limit}"),
-                vec![Box::new(r.to_string())],
+                "SELECT id, text_content, wing, room, source_file, valid_from, valid_to, last_accessed, access_count, importance_score FROM memories WHERE room = ?1 ORDER BY valid_from DESC LIMIT ?2".to_string(),
+                vec![Box::new(r.to_string()) as Box<dyn rusqlite::ToSql>, Box::new(capped_limit)],
             ),
             (None, None) => (
-                format!("SELECT id, text_content, wing, room, source_file, valid_from, valid_to, last_accessed, access_count, importance_score FROM memories ORDER BY valid_from DESC LIMIT {limit}"),
-                vec![],
+                "SELECT id, text_content, wing, room, source_file, valid_from, valid_to, last_accessed, access_count, importance_score FROM memories ORDER BY valid_from DESC LIMIT ?1".to_string(),
+                vec![Box::new(capped_limit) as Box<dyn rusqlite::ToSql>],
             ),
         };
         let mut stmt = self.db.prepare(&sql)?;

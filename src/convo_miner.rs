@@ -201,7 +201,12 @@ pub fn detect_convo_room(content: &str) -> String {
 
 pub fn get_mineable_convo_files(convo_path: &Path) -> Vec<std::path::PathBuf> {
     let mut files = Vec::new();
+    let canonical_root = match convo_path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return files,
+    };
     for entry in WalkDir::new(convo_path)
+        .follow_links(false)
         .into_iter()
         .filter_entry(|e| {
             let name = e.file_name().to_string_lossy();
@@ -210,6 +215,16 @@ pub fn get_mineable_convo_files(convo_path: &Path) -> Vec<std::path::PathBuf> {
         .flatten()
     {
         let path = entry.path();
+        // Boundary check: ensure resolved path stays under the root.
+        // If canonicalization fails, skip the entry rather than processing it
+        // without enforcing the root boundary.
+        let canonical = match path.canonicalize() {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if !canonical.starts_with(&canonical_root) {
+            continue;
+        }
         if path.is_file() {
             let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
             let ext_with_dot = format!(".{}", extension);
@@ -221,7 +236,7 @@ pub fn get_mineable_convo_files(convo_path: &Path) -> Vec<std::path::PathBuf> {
     files
 }
 
-use md5;
+use sha2::{Digest, Sha256};
 
 pub fn prepare_convo_documents(
     chunks: Vec<String>,
@@ -359,8 +374,9 @@ pub async fn mine_convos(
 }
 
 fn hash_string(s: &str) -> String {
-    let digest = md5::compute(s);
-    format!("{:x}", digest)
+    let mut hasher = Sha256::new();
+    hasher.update(s.as_bytes());
+    hex::encode(hasher.finalize())
 }
 
 #[cfg(test)]
@@ -533,6 +549,34 @@ mod tests {
         assert!(files
             .iter()
             .any(|f| f.to_string_lossy().ends_with("test.jsonl")));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_get_mineable_convo_files_excludes_symlinks_outside_root() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+
+        // Create a legitimate convo file inside root
+        std::fs::write(root.path().join("notes.md"), "# Notes").unwrap();
+
+        // Create a file outside root that a symlink will point to
+        let outside_file = outside.path().join("secrets.md");
+        std::fs::write(&outside_file, "secret notes").unwrap();
+
+        // Create a symlink inside root pointing outside
+        let link_path = root.path().join("escape.md");
+        std::os::unix::fs::symlink(&outside_file, &link_path).unwrap();
+
+        let files = get_mineable_convo_files(root.path());
+
+        // Only the real file inside root should be returned.
+        assert_eq!(
+            files.len(),
+            1,
+            "symlink pointing outside root must be excluded"
+        );
+        assert!(files[0].ends_with("notes.md"));
     }
 
     #[tokio::test]

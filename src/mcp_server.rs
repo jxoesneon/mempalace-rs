@@ -140,12 +140,12 @@ impl McpServer {
                 error: None,
                 id: req.id,
             },
-            Err(e) => JsonRpcResponse {
+            Err(_) => JsonRpcResponse {
                 jsonrpc: "2.0".to_string(),
                 result: None,
                 error: Some(JsonRpcError {
                     code: -32603,
-                    message: e.to_string(),
+                    message: "Internal server error".to_string(),
                     data: None,
                 }),
                 id: req.id,
@@ -463,7 +463,7 @@ impl McpServer {
             .ok_or_else(|| anyhow!("Missing query"))?;
         let wing = args["wing"].as_str().map(|s| s.to_string());
         let room = args["room"].as_str().map(|s| s.to_string());
-        let n_results = args["n_results"].as_u64().unwrap_or(5) as usize;
+        let n_results = args["n_results"].as_u64().unwrap_or(5).min(1000) as usize;
 
         let results = self
             .searcher
@@ -525,7 +525,7 @@ impl McpServer {
         let start_room = args["start_room"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing start_room"))?;
-        let max_hops = args["max_hops"].as_u64().unwrap_or(2) as usize;
+        let max_hops = args["max_hops"].as_u64().unwrap_or(2).min(10) as usize;
 
         let connected = self.pg.find_connected_rooms(start_room, max_hops);
         Ok(json!({ "start_room": start_room, "connected": connected }))
@@ -548,6 +548,9 @@ impl McpServer {
         let content = args["content"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing content"))?;
+        if content.len() > 1_000_000 {
+            return Err(anyhow!("Content exceeds maximum size of 1MB"));
+        }
         let wing = args["wing"].as_str().unwrap_or("general");
         let room = args["room"].as_str().unwrap_or("general");
 
@@ -647,7 +650,7 @@ impl McpServer {
         let agent = args["agent"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing agent"))?;
-        let last_n = args["last_n"].as_u64().unwrap_or(5) as usize;
+        let last_n = args["last_n"].as_u64().unwrap_or(5).min(1000) as usize;
 
         let entries = diary::read_diary(agent, last_n)?;
         Ok(json!({ "entries": entries }))
@@ -1214,6 +1217,19 @@ mod tests {
         let server = McpServer::new_test(config);
         let res = server.mempalace_find_tunnels().await.unwrap();
         assert!(res["tunnels"].is_array());
+    }
+
+    #[tokio::test]
+    async fn test_mempalace_add_drawer_content_too_large() {
+        let (config, _td) = setup_test();
+        let mut server = McpServer::new_test(config);
+        // 1MB + 1 byte exceeds the enforced limit
+        let big = "x".repeat(1_000_001);
+        let args = serde_json::json!({ "content": big, "wing": "test", "room": "test" });
+        let err = server.mempalace_add_drawer(&args).await;
+        assert!(err.is_err(), "content over 1MB must be rejected");
+        let msg = format!("{}", err.unwrap_err());
+        assert!(msg.contains("1MB"), "error should mention the size limit");
     }
 
     #[tokio::test]
