@@ -55,7 +55,7 @@
   },
   "optionalDependencies": {
     "benchmark": "^2.1.4",
-    "mathjs": "^14.5.3",
+    "mathjs": "^15.2.0",
     "usearch": "^2.17.1"
   }
 }
