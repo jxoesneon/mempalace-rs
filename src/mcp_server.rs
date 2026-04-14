@@ -781,7 +781,11 @@ mod tests {
         let resp = server.handle_request(req).await;
 
         assert!(resp.error.is_some());
-        assert!(resp.error.unwrap().message.contains("Internal server error"));
+        assert!(resp
+            .error
+            .unwrap()
+            .message
+            .contains("Internal server error"));
     }
 
     #[tokio::test]
@@ -925,7 +929,11 @@ mod tests {
         );
         let resp = server.handle_request(req).await;
         assert!(resp.error.is_some());
-        assert!(resp.error.unwrap().message.contains("Internal server error"));
+        assert!(resp
+            .error
+            .unwrap()
+            .message
+            .contains("Internal server error"));
     }
 
     #[tokio::test]
