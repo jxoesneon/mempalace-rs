@@ -141,8 +141,11 @@ impl McpServer {
                 id: req.id,
             },
             Err(e) => {
-                let sanitized = format!("{}", e)
-                    .replace(std::env::var("HOME").unwrap_or_default().as_str(), "~");
+                let message = format!("{}", e);
+                let sanitized = match std::env::var("HOME") {
+                    Ok(home) if !home.is_empty() => message.replace(home.as_str(), "~"),
+                    _ => message,
+                };
                 JsonRpcResponse {
                     jsonrpc: "2.0".to_string(),
                     result: None,

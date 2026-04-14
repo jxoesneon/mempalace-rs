@@ -210,9 +210,9 @@ impl EntityRegistry {
             path,
             data: RegistryData::empty(),
             client: Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
+                .timeout(std::time::Duration::from_secs(30))
                 .build()
-                .unwrap_or_default(),
+                .unwrap_or_else(|_| Client::new()),
         };
 
         let _ = registry.load();

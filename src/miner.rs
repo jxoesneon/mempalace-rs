@@ -152,11 +152,15 @@ pub fn get_mineable_files(project_path: &Path, no_gitignore: bool) -> Vec<std::p
 
     for entry in builder.build().flatten() {
         let path = entry.path();
-        // Boundary check: ensure resolved path stays under the root
-        if let Ok(canonical) = path.canonicalize() {
-            if !canonical.starts_with(&canonical_root) {
-                continue;
-            }
+        // Boundary check: only process entries whose canonical path can be
+        // resolved and proven to stay under the canonical project root.
+        // If canonicalization fails (broken symlink, permissions, race), skip.
+        let canonical = match path.canonicalize() {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if !canonical.starts_with(&canonical_root) {
+            continue;
         }
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         if SKIP_DIRS.contains(&name.as_ref()) {
@@ -716,6 +720,33 @@ mod tests {
         fs::write(path.join("LICENSE"), "").unwrap();
         let files2 = get_mineable_files(path, false);
         assert_eq!(files2.len(), 1); // LICENSE should be skipped by extension check
+    }
+
+    #[test]
+    fn test_get_mineable_files_excludes_symlinks_outside_root() {
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+
+        // Create a legitimate file inside root
+        fs::write(root.path().join("real.rs"), "fn main() {}").unwrap();
+
+        // Create a file outside root that we will try to reach via symlink
+        let outside_file = outside.path().join("secret.rs");
+        fs::write(&outside_file, "secret content").unwrap();
+
+        // Create a symlink inside root that points outside
+        let link_path = root.path().join("escape.rs");
+        std::os::unix::fs::symlink(&outside_file, &link_path).unwrap();
+
+        let files = get_mineable_files(root.path(), false);
+
+        // Only the real file inside root should be returned; the escaping symlink must be excluded.
+        assert_eq!(
+            files.len(),
+            1,
+            "symlink pointing outside root must be excluded"
+        );
+        assert!(files[0].ends_with("real.rs"));
     }
 
     #[test]

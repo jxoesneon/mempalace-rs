@@ -42,7 +42,6 @@ rayon = "1.10"
 dialoguer = "0.11"
 tempfile = "3.27.0"
 lazy_static = "1.5.0"
-md5 = "0.7.0"
 sha2 = "0.10"
 hex = "0.4.3"
 
