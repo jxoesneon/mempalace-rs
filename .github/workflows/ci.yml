@@ -16,7 +16,6 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # 1. Unified Compilation Job
@@ -49,7 +48,7 @@ jobs:
         run: ./target/release/download-model
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: compiled-mempalace
           path: |
@@ -138,7 +137,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: compiled-mempalace
           merge-multiple: true
@@ -173,7 +172,7 @@ jobs:
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: compiled-mempalace
           merge-multiple: true
@@ -213,7 +212,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libssl-dev ca-certificates
 
       - name: Download Artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: compiled-mempalace
           merge-multiple: true
@@ -254,7 +253,7 @@ jobs:
 
       - name: Download Artifacts
         if: matrix.os == 'ubuntu-latest'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: compiled-mempalace
           merge-multiple: true
@@ -278,7 +277,7 @@ jobs:
           tar -czf mempalace-rs-${{ matrix.os }}.tar.gz mempalace-rs-${{ matrix.os }}/
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: distribution-${{ matrix.os }}
           path: mempalace-rs-${{ matrix.os }}.tar.gz
