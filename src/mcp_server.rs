@@ -173,17 +173,17 @@ impl McpServer {
             "tools": [
                 {
                     "name": "mempalace_status",
-                    "description": "Returns total drawers, wings, rooms, protocol, and AAAK spec.",
+                    "description": "Get system status overview. Returns counts of all memory drawers (stored items), wings (top-level categories), rooms (sub-categories), the AAAK compression protocol version, and storage statistics. Use this to understand the current memory palace structure and storage utilization.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
                     "name": "mempalace_list_wings",
-                    "description": "Returns all wings with counts.",
+                    "description": "List all wings (top-level memory categories) with their drawer counts. Wings are the highest level of organization in the memory palace (e.g., 'rust_patterns', 'project_ideas'). Use this to discover available memory categories before searching or storing.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
                     "name": "mempalace_list_rooms",
-                    "description": "Returns rooms within a wing.",
+                    "description": "List all rooms (sub-categories) within a specific wing. Rooms organize memories within a wing (e.g., wing 'rust_patterns' might have rooms 'async', 'macros', 'lifetimes'). Use this to narrow down where to store or retrieve specific memories.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -194,12 +194,12 @@ impl McpServer {
                 },
                 {
                     "name": "mempalace_get_taxonomy",
-                    "description": "Returns full wing -> room -> count tree.",
+                    "description": "Get complete hierarchical taxonomy: wings -> rooms -> drawer counts. Returns the full tree structure showing how all memories are organized. Use this for navigation and understanding the complete memory organization structure.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
                     "name": "mempalace_search",
-                    "description": "Semantic search.",
+                    "description": "Search memories using semantic/vector similarity. Provide a natural language query to find semantically related content across all drawers. Results ranked by relevance. Optional: filter by wing and room. Use for fuzzy matching when exact keywords are unknown.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -213,7 +213,7 @@ impl McpServer {
                 },
                 {
                     "name": "mempalace_check_duplicate",
-                    "description": "Similarity check.",
+                    "description": "Check if similar content already exists before storing. Provide text to compare against all memories. Returns similarity score (0.0-1.0) to nearest match. Use threshold parameter (default 0.9) to detect duplicates. Essential for preventing redundant storage.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -225,12 +225,12 @@ impl McpServer {
                 },
                 {
                     "name": "mempalace_get_aaak_spec",
-                    "description": "Returns the AAAK spec.",
+                    "description": "Get the AAAK (Agent-to-Agent Knowledge) protocol specification. Returns the compression format and dialect rules used for encoding/decoding agent communications. Use this to understand the compression scheme for inter-agent knowledge transfer.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
                     "name": "mempalace_traverse_graph",
-                    "description": "Palace graph walk.",
+                    "description": "Traverse the memory palace graph starting from a specific room. Walks through room connections following the palace architecture. Use max_hops to limit traversal depth. Useful for exploring related memory clusters and spatial relationships.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -242,17 +242,17 @@ impl McpServer {
                 },
                 {
                     "name": "mempalace_find_tunnels",
-                    "description": "Bridge rooms.",
+                    "description": "Find connection tunnels (bridges) between otherwise disconnected memory rooms. Identifies paths that link different wings through shared concepts. Useful for discovering non-obvious relationships and navigation shortcuts across the memory palace.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
                     "name": "mempalace_graph_stats",
-                    "description": "Graph overview.",
+                    "description": "Get statistics about the palace graph structure: total nodes (rooms), edges (connections), density, and clustering metrics. Use this to understand the overall connectivity and organization health of the memory graph.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
                     "name": "mempalace_add_drawer",
-                    "description": "File verbatim content.",
+                    "description": "Store verbatim (exact) content in a memory drawer. Saves the complete text as-is without compression. Optionally specify wing and room for organization. If omitted, stores in default location. Required: content (the text to store). Use for preserving exact code, documentation, or facts.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -265,7 +265,7 @@ impl McpServer {
                 },
                 {
                     "name": "mempalace_delete_drawer",
-                    "description": "Remove drawer.",
+                    "description": "Permanently delete a memory drawer by its ID. This removes the stored content from the system. Required: memory_id (integer ID of the drawer to delete). Use when content is outdated, erroneous, or needs to be purged. Irreversible operation.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -276,7 +276,7 @@ impl McpServer {
                 },
                 {
                     "name": "mempalace_kg_query",
-                    "description": "KG access.",
+                    "description": "Query the Knowledge Graph for relationships involving a specific entity. Retrieves triples (subject-predicate-object) connected to the entity. Direction parameter controls: 'incoming' (what points to entity), 'outgoing' (what entity points to), or 'both' (default). Use to explore relational knowledge and dependencies.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -288,7 +288,7 @@ impl McpServer {
                 },
                 {
                     "name": "mempalace_kg_add",
-                    "description": "Add triple to KG.",
+                    "description": "Assert a new fact into the Knowledge Graph as a semantic triple: Subject -> Predicate -> Object. Creates a permanent relational link (e.g., 'Dependency X' 'breaks' 'Component Y'). Use to build logical chains, track dependencies, and encode structured knowledge beyond raw text.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -301,7 +301,7 @@ impl McpServer {
                 },
                 {
                     "name": "mempalace_kg_invalidate",
-                    "description": "Invalidate triple in KG.",
+                    "description": "Mark a Knowledge Graph triple as invalid/deprecated without deleting it. Preserves the assertion for audit but flags it as no longer current. Use when facts change or assertions become outdated but historical record is needed. Soft-delete for knowledge triples.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -314,7 +314,7 @@ impl McpServer {
                 },
                 {
                     "name": "mempalace_kg_timeline",
-                    "description": "KG timeline.",
+                    "description": "Get chronological history of all Knowledge Graph assertions involving an entity. Shows when triples were added and their validity status. Use to track how knowledge about an entity evolved over time and when specific relationships were established.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -325,12 +325,12 @@ impl McpServer {
                 },
                 {
                     "name": "mempalace_kg_stats",
-                    "description": "KG stats.",
+                    "description": "Get Knowledge Graph statistics: total triples, entities, predicates, and temporal distribution. Use this to understand the scale and structure of the relational knowledge base, distinct from the semantic memory drawers.",
                     "inputSchema": { "type": "object", "properties": {} }
                 },
                 {
                     "name": "mempalace_diary_write",
-                    "description": "Agent journal write.",
+                    "description": "Write an entry to an agent's chronological journal (diary). Records timestamped sequential logs for a specific agent identity. Use for tracking agent actions, decisions, reflections, or session progress. Creates temporal audit trail of agent activity.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -342,7 +342,7 @@ impl McpServer {
                 },
                 {
                     "name": "mempalace_diary_read",
-                    "description": "Agent journal read.",
+                    "description": "Read recent entries from an agent's chronological journal. Returns last N entries (default 5) in reverse chronological order. Use to recall recent agent activities, decisions, or context from previous sessions. Essential for maintaining continuity across invocations.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
