@@ -69,3 +69,14 @@ path = "src/bin/download_model.rs"
 # See: https://github.com/unum-cloud/usearch/issues/746
 [patch.crates-io]
 usearch = { path = "patches/usearch" }
+# Patch core2 to fix yanked version (RUSTSEC-2026-0099)
+# All crates.io versions were yanked, using GitHub source
+# Version bumped to 0.4.1 to avoid yank conflict
+core2 = { path = "patches/core2" }
+# Patch tungstenite to fix rand vulnerability (RUSTSEC-2026-0097)
+# Upgraded rand from 0.8.5 to 0.9.0
+tungstenite = { path = "patches/tungstenite" }
+# Patch rustls-webpki to fix certificate validation vulnerabilities
+# RUSTSEC-2026-0098 and RUSTSEC-2026-0099
+# Upgraded from 0.103.11 to 0.103.12
+rustls-webpki = { path = "patches/rustls-webpki" }
