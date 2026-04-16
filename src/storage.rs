@@ -709,7 +709,11 @@ impl Storage {
                 if distance < (1.0 - threshold) && !processed.contains(&neighbor_id) {
                     if let Ok(neighbor_rec) = vs.get_memory_by_id(neighbor_id) {
                         // Check if it belongs to the same wing (if wing filter is active)
-                        if wing.as_ref().map(|w| *w == neighbor_rec.wing).unwrap_or(true) {
+                        if wing
+                            .as_ref()
+                            .map(|w| *w == neighbor_rec.wing)
+                            .unwrap_or(true)
+                        {
                             cluster.push(neighbor_rec);
                             processed.insert(neighbor_id);
                         }
@@ -722,7 +726,11 @@ impl Storage {
                 report.merged += cluster.len() - 1;
 
                 // Pick winner (highest decayed importance)
-                cluster.sort_by(|a, b| b.importance.partial_cmp(&a.importance).unwrap_or(std::cmp::Ordering::Equal));
+                cluster.sort_by(|a, b| {
+                    b.importance
+                        .partial_cmp(&a.importance)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
                 let winner = &cluster[0];
                 let losers = &cluster[1..];
 
