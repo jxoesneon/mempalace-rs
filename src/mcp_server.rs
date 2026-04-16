@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use tokio::io::{stdin, stdout, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{stdin, AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 use crate::config::MempalaceConfig;
 use crate::dialect::Dialect;
@@ -51,7 +51,13 @@ impl McpServer {
         // Ensure config directory exists
         let _ = std::fs::create_dir_all(&config.config_dir);
 
-        let searcher = Searcher::new(config.clone());
+        // Initialize the Searcher (which eagerly loads the 87MB ONNX embedder model)
+        // on a dedicated blocking thread so we don't starve the Tokio event loop.
+        let config_for_searcher = config.clone();
+        let searcher = tokio::task::spawn_blocking(move || Searcher::new(config_for_searcher))
+            .await
+            .map_err(|e| anyhow::anyhow!("Searcher init panicked: {e}"))?;
+
         let kg = KnowledgeGraph::new(
             config
                 .config_dir
@@ -93,6 +99,7 @@ impl McpServer {
 
     pub async fn run(&mut self) -> Result<()> {
         let mut reader = BufReader::new(stdin());
+        let mut writer = tokio::io::BufWriter::new(tokio::io::stdout());
         let mut line = String::new();
 
         while reader.read_line(&mut line).await? > 0 {
@@ -113,8 +120,9 @@ impl McpServer {
 
             let resp = self.handle_request(req).await;
             let resp_json = serde_json::to_string(&resp)? + "\n";
-            stdout().write_all(resp_json.as_bytes()).await?;
-            stdout().flush().await?;
+            writer.write_all(resp_json.as_bytes()).await?;
+            writer.flush().await?;
+
             line.clear();
         }
 

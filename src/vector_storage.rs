@@ -558,7 +558,8 @@ impl VectorStorage {
             .ok_or_else(|| anyhow!("Non-UTF8 path"))?;
         self.index
             .save(path)
-            .map_err(|e| anyhow!("Save failed: {e}"))
+            .map_err(|e| anyhow!("Save failed: {e}"))?;
+        Ok(())
     }
 
     pub fn memory_count(&self) -> Result<u64> {
