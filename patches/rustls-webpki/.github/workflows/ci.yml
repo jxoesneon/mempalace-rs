@@ -1,0 +1,322 @@
+name: ci
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: ["main", "ci/*"]
+  pull_request:
+  merge_group:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+jobs:
+  rustfmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - run: cargo clippy --locked --all-features --all-targets -- --deny warnings
+
+  deny:
+    name: Cargo Deny
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo deny
+        uses: taiki-e/install-action@cargo-deny
+
+      - run: cargo deny --locked check
+
+  # Verify that documentation builds.
+  rustdoc:
+    name: Check for documentation errors
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rust_channel:
+          - stable
+          - beta
+          - nightly
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust_channel }}
+
+      - name: cargo doc (all features)
+        run: cargo doc --locked --all-features --document-private-items
+        env:
+          RUSTDOCFLAGS: ${{ matrix.rust_channel == 'nightly' && '-Dwarnings --cfg=webpki_docsrs' || '-Dwarnings' }}
+
+  package:
+    name: Cargo Package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo package --locked --all-features
+
+  test:
+    name: Build+test
+    runs-on: ${{ matrix.host_os }}
+    strategy:
+      matrix:
+        features:
+          -  # Default
+          - --features alloc
+          - --all-features
+          - --no-default-features
+          - --no-default-features --features alloc
+          - --no-default-features --features aws-lc-rs
+          - --no-default-features --features ring
+          - --no-default-features --features alloc,aws-lc-rs
+          - --no-default-features --features alloc,ring
+          # `std` is enabled by default
+          - --features aws-lc-rs
+          - --features aws-lc-rs-unstable
+          - --features ring
+
+        host_os:
+          - ubuntu-latest
+
+        rust_channel:
+          - stable
+
+        include:
+          # Test aws-lc-rs across Rust channels
+          - features: --features aws-lc-rs
+            rust_channel: beta
+            host_os: ubuntu-latest
+
+          - features: --features aws-lc-rs
+            rust_channel: nightly
+            host_os: ubuntu-latest
+
+          # Test aws-lc-rs across OSes
+          - features: --features aws-lc-rs
+            rust_channel: stable
+            host_os: macos-latest
+
+          - features: --features aws-lc-rs
+            rust_channel: stable
+            host_os: windows-latest
+
+          # Test ring across OSes
+          - features: --features ring
+            rust_channel: stable
+            host_os: macos-latest
+
+          - features: --features ring
+            rust_channel: stable
+            host_os: windows-latest
+
+          # Test aws-lc-rs-fips on Linux only (stable only)
+          - features: --features aws-lc-rs-fips
+            rust_channel: stable
+            host_os: ubuntu-latest
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install rust ${{ matrix.rust_channel }} toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust_channel }}
+
+      - name: Install ninja-build tool for aws-lc-fips-sys on Windows
+        if: runner.os == 'Windows'
+        uses: seanmiddleditch/gha-setup-ninja@v6
+
+      - name: cargo test (${{ matrix.features }})
+        run: cargo test --locked ${{ matrix.features }} -- --include-ignored
+        env:
+          AWS_LC_SYS_PREBUILT_NASM: "1" # for benefit of rcgen
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.71"
+      - run: cargo check --locked --lib --all-features
+
+  cross:
+    name: Check cross compilation targets
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cross
+        uses: taiki-e/install-action@cross
+
+      - run: cross build --locked --target i686-unknown-linux-gnu
+
+  semver:
+    name: Check semver compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Check semver
+        uses: obi1kenobi/cargo-semver-checks-action@v2
+
+  check-external-types:
+    name: Validate external types appearing in public API
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-10-18
+          # ^ sync with https://github.com/awslabs/cargo-check-external-types/blob/main/rust-toolchain.toml
+      - name: Install cargo-check-external-types
+        uses: taiki-e/cache-cargo-install-action@v3
+        with:
+          tool: cargo-check-external-types
+      - name: run cargo-check-external-types
+        run: cargo check-external-types
+
+  coverage:
+    name: Measure coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools
+
+      - name: Measure coverage
+        run: cargo llvm-cov --locked --all-features --lcov --output-path ./lcov.info -- --include-ignored
+
+      - name: Report to codecov.io
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./lcov.info
+          fail_ci_if_error: false
+
+  nostd:
+    name: Verify that no-std modes do not rely on libstd
+    runs-on: ubuntu-latest
+    # a target without a pre-compiled libstd like this one will catch any use of libstd in the
+    # entire dependency graph whereas a target like x86_64-unknown-linux-gnu will not
+    env:
+      NOSTD_TARGET: x86_64-unknown-none
+    strategy:
+      matrix:
+        features:
+          - --no-default-features
+          - --no-default-features --features alloc
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: "$NOSTD_TARGET"
+
+      - name: check no-std mode
+        run: cargo check --locked --target $NOSTD_TARGET ${{ matrix.features  }}
+
+  feature-powerset:
+    name: Feature Powerset
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo hack
+        uses: taiki-e/install-action@cargo-hack
+
+      - name: Check feature powerset
+        run: >
+          cargo hack check
+          --feature-powerset
+          --no-dev-deps
+          --mutually-exclusive-features aws-lc-rs,aws-lc-rs-fips,aws-lc-rs-unstable
