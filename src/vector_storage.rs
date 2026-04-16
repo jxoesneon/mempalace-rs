@@ -10,9 +10,8 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use fastembed::TextEmbedding;
 use rusqlite::{params, Connection, OptionalExtension};
-use std::path::PathBuf;
 use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 
 const VECTOR_DIMS: usize = 384;
@@ -75,28 +74,8 @@ pub struct VectorStorage {
 
 impl VectorStorage {
     pub fn new(db_path: impl AsRef<Path>, index_path: impl AsRef<Path>) -> Result<Self> {
-        let cache_dir = std::env::var("MEMPALACE_MODELS_DIR")
-            .ok()
-            .map(PathBuf::from)
-            .filter(|p| p.exists())
-            .or_else(|| {
-                std::env::current_exe()
-                    .ok()
-                    .and_then(|exe| exe.parent().map(|p| p.join("models")))
-                    .filter(|p| p.exists())
-            });
-
-        let mut init_opts =
-            InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(false);
-
-        if let Some(cache) = cache_dir {
-            init_opts = init_opts.with_cache_dir(cache);
-        }
-
-        let embedder =
-            TextEmbedding::try_new(init_opts).context("Failed to initialise fastembed")?;
-
-        Self::new_with_embedder(db_path, index_path, Arc::new(embedder))
+        let embedder = crate::embedder_factory::EmbedderFactory::get_embedder()?;
+        Self::new_with_embedder(db_path, index_path, embedder)
     }
 
     pub fn new_with_embedder(
@@ -558,7 +537,8 @@ impl VectorStorage {
             .ok_or_else(|| anyhow!("Non-UTF8 path"))?;
         self.index
             .save(path)
-            .map_err(|e| anyhow!("Save failed: {e}"))
+            .map_err(|e| anyhow!("Save failed: {e}"))?;
+        Ok(())
     }
 
     pub fn memory_count(&self) -> Result<u64> {

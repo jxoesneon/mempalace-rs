@@ -43,24 +43,8 @@ pub async fn run_longmemeval(path: &Path, mode: &str) -> Result<BenchmarkResult>
 
     println!("Evaluating {} questions in mode '{}'...", count, mode);
 
-    // 0. Initialize shared embedder ONCE for the entire benchmark
-    let cache_dir = std::env::var("MEMPALACE_MODELS_DIR")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .filter(|p| p.exists())
-        .or_else(|| {
-            std::env::current_exe()
-                .ok()
-                .and_then(|exe| exe.parent().map(|p| p.join("models")))
-                .filter(|p| p.exists())
-        });
-
-    let mut init_opts = fastembed::InitOptions::new(fastembed::EmbeddingModel::AllMiniLML6V2)
-        .with_show_download_progress(false);
-    if let Some(cache) = cache_dir {
-        init_opts = init_opts.with_cache_dir(cache);
-    }
-    let embedder = std::sync::Arc::new(fastembed::TextEmbedding::try_new(init_opts)?);
+    // 0. The shared embedder is automatically cached via the global EmbedderFactory
+    // inside VectorStorage::new.
 
     let dialect = Dialect::new(None, None);
 
@@ -70,11 +54,7 @@ pub async fn run_longmemeval(path: &Path, mode: &str) -> Result<BenchmarkResult>
         let db_path = temp_dir.path().join("bench.db");
         let index_path = temp_dir.path().join("bench.index");
 
-        let mut storage = crate::vector_storage::VectorStorage::new_with_embedder(
-            &db_path,
-            &index_path,
-            embedder.clone(),
-        )?;
+        let mut storage = crate::vector_storage::VectorStorage::new(&db_path, &index_path)?;
 
         // Map indexed i64 IDs back to their original string IDs from the dataset
         let mut id_map = HashMap::new();

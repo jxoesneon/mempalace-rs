@@ -10,6 +10,7 @@ pub mod config;
 pub mod convo_miner;
 pub mod dialect;
 pub mod diary;
+pub mod embedder_factory;
 pub mod entity_detector;
 pub mod entity_registry;
 pub mod extractor;
