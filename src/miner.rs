@@ -57,6 +57,13 @@ pub fn chunk_text(content: &str) -> Vec<String> {
             }
         }
 
+        // Ensure start and end are valid UTF-8 character boundaries
+        while start > 0 && !content.is_char_boundary(start) {
+            start -= 1;
+        }
+        while end < content.len() && !content.is_char_boundary(end) {
+            end += 1;
+        }
         let chunk = content[start..end].trim();
         if chunk.len() >= MIN_CHUNK_SIZE {
             chunks.push(chunk.to_string());
