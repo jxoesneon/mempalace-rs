@@ -8,20 +8,15 @@ use std::path::PathBuf;
 // Note: Custom VectorStorage (fastembed + usearch + rusqlite) is used.
 
 /// High-level search interface for retrieving context from the Palace.
-///
-/// The `Arc<TextEmbedding>` embedder is initialized globally inside
-/// `EmbedderFactory` to eliminate ONNX model re-loads.
 pub struct Searcher {
     pub config: MempalaceConfig,
 }
 
 impl Searcher {
-    /// Construct a `Searcher`. The embedder is now globally cached.
     pub fn new(config: MempalaceConfig) -> Self {
         Searcher { config }
     }
 
-    /// Open a `VectorStorage`, picking up the global cached embedder.
     fn open_vector_storage(&self) -> Option<VectorStorage> {
         VectorStorage::new(
             self.config.config_dir.join("vectors.db"),
