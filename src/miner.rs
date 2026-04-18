@@ -34,6 +34,7 @@ pub const MIN_CHUNK_SIZE: usize = 50;
 
 pub fn chunk_text(content: &str) -> Vec<String> {
     let content = content.trim();
+
     if content.is_empty() {
         return vec![];
     }
@@ -41,68 +42,55 @@ pub fn chunk_text(content: &str) -> Vec<String> {
     let mut chunks = Vec::new();
     let mut start = 0;
 
-    while start < content.len() {
-        // Ensure start is at a char boundary
-        while start < content.len() && !content.is_char_boundary(start) {
-            start += 1;
-        }
-        
-        if start >= content.len() {
-            break;
-        }
+    let indices: Vec<usize> =
+        content.char_indices().map(|(i, _)| i).collect();
 
-        let mut end = std::cmp::min(start + CHUNK_SIZE, content.len());
-        
-        // Find nearest char boundary for end BEFORE any slicing
-        while end > start && !content.is_char_boundary(end) {
-            end -= 1;
-        }
+    let mut i = 0;
+
+    while i < indices.len() {
+        let end_index_pos = std::cmp::min(
+            i + CHUNK_SIZE,
+            indices.len(),
+        );
+
+        let mut end = if end_index_pos < indices.len() {
+            indices[end_index_pos]
+        } else {
+            content.len()
+        };
 
         if end < content.len() {
-            // Try to break at paragraph boundary
-            // Now safe to slice because we verified end is a char boundary
             let slice = &content[start..end];
-            if let Some(newline_pos) = slice.rfind("\n\n") {
-                if newline_pos > CHUNK_SIZE / 2 {
-                    end = start + newline_pos;
+
+            if let Some(pos) = slice.rfind("\n\n") {
+                if pos > CHUNK_SIZE / 2 {
+                    end = start + pos;
                 }
-            } else if let Some(newline_pos) = slice.rfind('\n') {
-                if newline_pos > CHUNK_SIZE / 2 {
-                    end = start + newline_pos;
+            } else if let Some(pos) = slice.rfind('\n') {
+                if pos > CHUNK_SIZE / 2 {
+                    end = start + pos;
                 }
             }
         }
-        
-        // Re-ensure end is at a char boundary after searching for newlines
-        while end > start && !content.is_char_boundary(end) {
-            end -= 1;
-        }
 
-        let chunk = content[start..end].trim();
-        if chunk.len() >= MIN_CHUNK_SIZE {
-            chunks.push(chunk.to_string());
+        if let Some(chunk) = content.get(start..end) {
+            let chunk = chunk.trim();
+
+            if chunk.len() >= MIN_CHUNK_SIZE {
+                chunks.push(chunk.to_string());
+            }
         }
 
         if end >= content.len() {
             break;
         }
-        
-        // Compute overlap and ensure start is at a char boundary
-        let next_start = if end > CHUNK_OVERLAP {
-            let mut s = end - CHUNK_OVERLAP;
-            while s < end && !content.is_char_boundary(s) {
-                s += 1;
-            }
-            if s >= end { end } else { s }
-        } else {
-            0
-        };
 
-        if next_start <= start {
-            start = end;
-        } else {
-            start = next_start;
-        }
+        let overlap_chars =
+            std::cmp::min(CHUNK_OVERLAP, indices.len());
+
+        i = end_index_pos.saturating_sub(overlap_chars);
+
+        start = indices[i];
     }
 
     chunks
