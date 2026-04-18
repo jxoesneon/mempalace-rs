@@ -49,6 +49,8 @@ hex = "0.4.3"
 fastembed = "4"
 usearch = "2"
 ignore = "0.4.25"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
 
 [[bin]]
 name = "update-benchmarks"
@@ -56,6 +58,8 @@ path = "scripts/update_benchmarks.rs"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
+rand = "0.9"
+tempfile = "3.27.0"
 
 [[bench]]
 name = "benchmarks"

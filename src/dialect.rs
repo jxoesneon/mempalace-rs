@@ -407,10 +407,14 @@ impl Dialect {
 
         scored.sort_by(|a, b| b.0.cmp(&a.0));
         let best = scored[0].1;
-        if best.len() > 55 {
-            format!("{}...", best.chars().take(52).collect::<String>())
+
+        // Phase 9 Hardening: Sanitize to prevent AAAK segment injection
+        let sanitized = best.replace(['|', '\n'], " ").replace('"', "'");
+
+        if sanitized.len() > 55 {
+            format!("{}...", sanitized.chars().take(52).collect::<String>())
         } else {
-            best.to_string()
+            sanitized
         }
     }
 
@@ -585,17 +589,20 @@ impl Dialect {
 
         if source.is_some() || wing.is_some() {
             let header_parts = [
-                wing.map(|s| s.as_str()).unwrap_or("?"),
-                room.map(|s| s.as_str()).unwrap_or("?"),
-                date.map(|s| s.as_str()).unwrap_or("?"),
+                wing.map(|s| s.replace('|', " "))
+                    .unwrap_or_else(|| "?".to_string()),
+                room.map(|s| s.replace('|', " "))
+                    .unwrap_or_else(|| "?".to_string()),
+                date.map(|s| s.as_str()).unwrap_or("?").to_string(),
                 source
                     .map(|s| {
                         Path::new(s)
                             .file_stem()
                             .and_then(|s| s.to_str())
-                            .unwrap_or("?")
+                            .map(|s| s.replace('|', " "))
+                            .unwrap_or_else(|| "?".to_string())
                     })
-                    .unwrap_or("?"),
+                    .unwrap_or_else(|| "?".to_string()),
             ];
             lines.push(header_parts.join("|"));
         }

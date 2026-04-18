@@ -628,18 +628,13 @@ impl Storage {
             Err(_) => (0, std::collections::HashSet::new()),
         };
 
-        println!("\n  🏠 Palace Status");
-        println!("  {}", "─".repeat(20));
-        println!("  Total Drawers: {}", count);
-        println!(
-            "  Wings Filed:   {:?}",
+        tracing::info!("🏠 Palace Status");
+        tracing::info!("Total Drawers: {}", count);
+        tracing::info!(
+            "Wings Filed:   {:?}",
             wings.iter().map(|(n, _)| n).collect::<Vec<_>>()
         );
-        println!(
-            "  Rooms Found:   {:?}",
-            rooms.into_iter().collect::<Vec<_>>()
-        );
-        println!();
+        tracing::info!("Rooms Found:   {:?}", rooms.into_iter().collect::<Vec<_>>());
 
         Ok(())
     }
@@ -651,16 +646,13 @@ impl Storage {
     ) -> Result<()> {
         if let Ok(vs) = open_vector_storage(config) {
             if let Ok(records) = vs.get_memories(wing.as_deref(), None, usize::MAX) {
-                println!("\n  🗜  Compressing Drawers");
-                println!("  {}", "─".repeat(24));
+                tracing::info!("🗜  Compressing Drawers");
                 for record in records {
                     let compressed = crate::dialect::AAAKContext::compress(&record.text_content);
-                    println!("  {}", compressed);
+                    tracing::info!("{}", compressed);
                 }
-                println!();
             }
         }
-
         Ok(())
     }
 

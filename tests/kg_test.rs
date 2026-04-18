@@ -116,6 +116,6 @@ fn test_kg_invalidate() {
 
 #[test]
 fn test_kg_invalid_path() {
-    let result = KnowledgeGraph::new("/invalid/path/that/cannot/exist/kg.db");
+    let result = KnowledgeGraph::new("/invalid/path/\0/kg.db");
     assert!(result.is_err());
 }

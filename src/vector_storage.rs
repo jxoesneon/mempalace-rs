@@ -12,11 +12,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{anyhow, Context, Result};
 use fastembed::TextEmbedding;
 use rusqlite::{params, Connection, OptionalExtension};
+use tracing::info;
 use usearch::{Index, IndexOptions, MetricKind, ScalarKind};
 
 const VECTOR_DIMS: usize = 384;
 const HNSW_M: usize = 16;
 const HNSW_EF_CONSTRUCTION: usize = 128;
+pub const MAX_TOTAL_MEMORIES: u64 = 100_000;
 
 /// A structured record of a single atomic memory filed in the Palace.
 #[derive(Debug, Clone)]
@@ -163,11 +165,23 @@ impl VectorStorage {
             build_index()?
         };
 
-        Ok(Self {
+        let mut vs = Self {
             embedder,
             db,
             index,
-        })
+        };
+
+        // Round 5 Fix: Watchdog - Auto-heal if index is empty but DB is not
+        if vs.index.size() == 0 {
+            if let Ok(count) = vs.memory_count() {
+                if count > 0 {
+                    info!("Watchdog: Index is empty but DB has {count} records. Triggering hot-repair...");
+                    let _ = vs.auto_repair();
+                }
+            }
+        }
+
+        Ok(vs)
     }
 
     pub fn add_memory(
@@ -178,6 +192,14 @@ impl VectorStorage {
         source_file: Option<&str>,
         source_mtime: Option<f64>,
     ) -> Result<i64> {
+        // Round 5 Fix: Enforce Quota in single-add path
+        if self.memory_count()? >= MAX_TOTAL_MEMORIES {
+            return Err(anyhow!(
+                "Storage quota reached (max {} memories).",
+                MAX_TOTAL_MEMORIES
+            ));
+        }
+
         let vector = self.embed_single(text)?;
         let valid_from = now_unix();
 
@@ -530,6 +552,35 @@ impl VectorStorage {
         Ok(pairs)
     }
 
+    pub fn auto_repair(&mut self) -> Result<usize> {
+        let db_ids: Vec<i64> = self
+            .get_all_ids(None)
+            .context("Failed to get IDs for repair")?;
+        let mut repaired = 0;
+
+        for id in db_ids {
+            if !self.index.contains(id as u64) {
+                let record = self.get_memory_by_id(id)?;
+                let vector = self.embed_single(&record.text_content)?;
+
+                let needed = self.index.size() + 1;
+                if needed > self.index.capacity() {
+                    self.index.reserve(needed * 2)?;
+                }
+
+                self.index
+                    .add(id as u64, &vector)
+                    .map_err(|e| anyhow!("Repair failed for ID {id}: {e}"))?;
+                repaired += 1;
+            }
+        }
+
+        if repaired > 0 {
+            info!("Auto-repair synced {repaired} memories from DB to index");
+        }
+        Ok(repaired)
+    }
+
     pub fn save_index(&self, index_path: impl AsRef<Path>) -> Result<()> {
         let path = index_path
             .as_ref()
@@ -555,15 +606,110 @@ impl VectorStorage {
     }
 
     pub fn embed_single(&self, text: &str) -> Result<Vec<f32>> {
+        let safe_text = text.chars().take(8192).collect::<String>();
         let mut batch = self
             .embedder
-            .embed(vec![text.to_string()], None)
+            .embed(vec![safe_text], None)
             .context("fastembed failed")?;
         let vec = batch.pop().ok_or_else(|| anyhow!("Empty batch"))?;
         if vec.len() != VECTOR_DIMS {
             return Err(anyhow!("Expected {VECTOR_DIMS}-dim, got {}", vec.len()));
         }
         Ok(vec)
+    }
+
+    /// Embed multiple texts in a single batch for performance.
+    pub fn embed_batch(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(vec![]);
+        }
+        let safe_texts: Vec<String> = texts
+            .into_iter()
+            .map(|t| t.chars().take(8192).collect::<String>())
+            .collect();
+        let embeddings = self
+            .embedder
+            .embed(safe_texts, None)
+            .context("fastembed failed")?;
+        Ok(embeddings)
+    }
+
+    /// Add multiple memories in a batch, using batch embedding and a single transaction.
+    pub fn add_memories_batch(
+        &mut self,
+        texts: Vec<String>,
+        wings: Vec<String>,
+        rooms: Vec<String>,
+        source_files: Vec<Option<String>>,
+        source_mtimes: Vec<Option<f64>>,
+    ) -> Result<Vec<i64>> {
+        let n = texts.len();
+        if n == 0 {
+            return Ok(vec![]);
+        }
+
+        // Guard: Storage Quota
+        if self.memory_count()? + (n as u64) > MAX_TOTAL_MEMORIES {
+            return Err(anyhow!(
+                "Batch addition would exceed storage quota (max {} memories).",
+                MAX_TOTAL_MEMORIES
+            ));
+        }
+
+        if n != wings.len()
+            || n != rooms.len()
+            || n != source_files.len()
+            || n != source_mtimes.len()
+        {
+            return Err(anyhow!("Batch input lengths do not match"));
+        }
+
+        // 1. Batch Embed
+        let vectors = self.embed_batch(texts.clone())?;
+
+        // 2. Index Capacity Check - must do before DB transaction to minimize desync risk
+        let needed = self.index.size() + n;
+        if needed > self.index.capacity() {
+            let new_cap = (needed * 2).max(64);
+            self.index
+                .reserve(new_cap)
+                .map_err(|e| anyhow!("usearch reserve failed: {e}"))?;
+        }
+
+        // 3. Database Transaction
+        let valid_from = now_unix();
+        let mut ids = Vec::with_capacity(n);
+
+        let tx = self.db.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO memories (text_content, wing, room, source_file, source_mtime, valid_from, last_accessed, access_count, importance_score)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 5.0)",
+            )?;
+
+            for i in 0..n {
+                stmt.execute(params![
+                    texts[i],
+                    wings[i],
+                    rooms[i],
+                    source_files[i],
+                    source_mtimes[i],
+                    valid_from,
+                    valid_from
+                ])?;
+                ids.push(tx.last_insert_rowid());
+            }
+        }
+        tx.commit()?;
+
+        // 4. Index Update
+        for i in 0..n {
+            self.index
+                .add(ids[i] as u64, &vectors[i])
+                .map_err(|e| anyhow!("usearch add failed at index {i}: {e}"))?;
+        }
+
+        Ok(ids)
     }
 }
 

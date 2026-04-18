@@ -1,6 +1,6 @@
 use crate::config::MempalaceConfig;
 use crate::storage::MemoryStack;
-use crate::vector_storage::VectorStorage;
+use crate::vector_storage::{MemoryRecord, VectorStorage};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -10,19 +10,38 @@ use std::path::PathBuf;
 /// High-level search interface for retrieving context from the Palace.
 pub struct Searcher {
     pub config: MempalaceConfig,
+    pub store: std::sync::Mutex<Option<VectorStorage>>,
 }
 
 impl Searcher {
     pub fn new(config: MempalaceConfig) -> Self {
-        Searcher { config }
+        Searcher {
+            config,
+            store: std::sync::Mutex::new(None),
+        }
     }
 
-    fn open_vector_storage(&self) -> Option<VectorStorage> {
-        VectorStorage::new(
-            self.config.config_dir.join("vectors.db"),
-            self.config.config_dir.join("vectors.usearch"),
-        )
-        .ok()
+    fn open_vector_storage(&self) -> Result<std::sync::MutexGuard<'_, Option<VectorStorage>>> {
+        let mut store_guard = match self.store.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => {
+                // Recovery logic: clear the poisoned state and try to lock again
+                let mut guard = poisoned.into_inner();
+                *guard = None;
+                guard
+            }
+        };
+
+        if store_guard.is_none() {
+            // Graceful initialization: if it fails, we keep it as None but don't panic/err
+            if let Ok(store) = VectorStorage::new(
+                self.config.config_dir.join("vectors.db"),
+                self.config.config_dir.join("vectors.usearch"),
+            ) {
+                *store_guard = Some(store);
+            }
+        }
+        Ok(store_guard)
     }
 
     pub fn add_memory(
@@ -33,21 +52,25 @@ impl Searcher {
         source_file: Option<&str>,
         source_mtime: Option<f64>,
     ) -> Result<i64> {
-        let mut store = self
-            .open_vector_storage()
-            .ok_or_else(|| anyhow::anyhow!("Vector storage unavailable"))?;
+        let mut store_guard = self.open_vector_storage()?;
+        let store = store_guard.as_mut().unwrap();
         let id = store.add_memory(text, wing, room, source_file, source_mtime)?;
         store.save_index(self.config.config_dir.join("vectors.usearch"))?;
         Ok(id)
     }
 
     pub fn delete_memory(&self, memory_id: i64) -> Result<()> {
-        let store = self
-            .open_vector_storage()
-            .ok_or_else(|| anyhow::anyhow!("Vector storage unavailable"))?;
+        let mut store_guard = self.open_vector_storage()?;
+        let store = store_guard.as_mut().unwrap();
         store.delete_memory(memory_id)?;
         store.save_index(self.config.config_dir.join("vectors.usearch"))?;
         Ok(())
+    }
+
+    pub fn get_memory_by_id(&self, memory_id: i64) -> Result<MemoryRecord> {
+        let mut store_guard = self.open_vector_storage()?;
+        let store = store_guard.as_mut().unwrap();
+        store.get_memory_by_id(memory_id)
     }
 
     pub async fn wake_up(&self, wing: Option<String>) -> Result<String> {
@@ -157,7 +180,8 @@ impl Searcher {
         n_results: usize,
     ) -> Result<String> {
         // Use pure-Rust VectorStorage (lazy initialization)
-        let Some(store) = self.open_vector_storage() else {
+        let store_guard = self.open_vector_storage()?;
+        let Some(store) = store_guard.as_ref() else {
             return Ok(format!(
                 "\n  No results found for: \"{}\" (vector storage unavailable)",
                 query
@@ -241,7 +265,8 @@ impl Searcher {
         n_results: usize,
     ) -> Result<serde_json::Value> {
         // Use pure-Rust VectorStorage (lazy initialization)
-        let Some(store) = self.open_vector_storage() else {
+        let store_guard = self.open_vector_storage()?;
+        let Some(store) = store_guard.as_ref() else {
             return Ok(Self::format_json_results(
                 query,
                 wing.as_ref(),

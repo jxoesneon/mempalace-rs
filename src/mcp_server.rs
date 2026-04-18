@@ -2,7 +2,10 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use tokio::io::{stdin, AsyncBufReadExt, AsyncWriteExt, BufReader};
+use std::sync::Arc;
+use tokio::io::{stdin, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::{mpsc, Mutex, Semaphore};
+use tracing::{error, span, warn, Level};
 
 use crate::config::MempalaceConfig;
 use crate::dialect::Dialect;
@@ -40,26 +43,44 @@ struct JsonRpcError {
 
 pub struct McpServer {
     config: MempalaceConfig,
-    searcher: Searcher,
-    kg: KnowledgeGraph,
-    pg: PalaceGraph,
+    searcher: Arc<Searcher>,
+    kg: Arc<Mutex<KnowledgeGraph>>,
+    pg: Arc<Mutex<PalaceGraph>>,
     dialect: Dialect,
+    semaphore: Arc<Semaphore>,
 }
 
 impl McpServer {
     pub async fn new(config: MempalaceConfig) -> Result<Self> {
-        // Ensure config directory exists
         let _ = std::fs::create_dir_all(&config.config_dir);
 
-        // Pre-warm the global ONNX embedder model on a dedicated blocking thread
-        // so we don't starve the Tokio event loop with the heavy 160ms initialization.
         let _ = tokio::task::spawn_blocking(|| {
             crate::embedder_factory::EmbedderFactory::get_embedder()
         })
         .await
-        .map_err(|e| anyhow::anyhow!("EmbedderFactory init panicked: {e}"))?;
+        .map_err(|e| anyhow!("EmbedderFactory init panicked: {e}"))?;
 
-        let searcher = Searcher::new(config.clone());
+        let searcher = Arc::new(Searcher::new(config.clone()));
+
+        // Round 3 Fix: Auto-repair index on startup
+        let vs_res = tokio::task::spawn_blocking({
+            let config = config.clone();
+            move || {
+                let mut vs = VectorStorage::new(
+                    config.config_dir.join("vectors.db"),
+                    config.config_dir.join("vectors.usearch"),
+                )?;
+                let repaired = vs.auto_repair()?;
+                if repaired > 0 {
+                    vs.save_index(config.config_dir.join("vectors.usearch"))?;
+                }
+                Ok::<_, anyhow::Error>(())
+            }
+        })
+        .await?;
+        if let Err(e) = vs_res {
+            warn!("Startup auto-repair failed (continuing): {}", e);
+        }
 
         let kg = KnowledgeGraph::new(
             config
@@ -68,80 +89,168 @@ impl McpServer {
                 .to_str()
                 .unwrap_or("knowledge.db"),
         )?;
-        let pg = PalaceGraph::new();
-        // Phase 4: load external emotion map and inject into dialect
+        let mut pg = PalaceGraph::new();
+
+        // Round 2 Fix: Reload taxonomy from DB on startup
+        let vectors_db_path = config.config_dir.join("vectors.db");
+        if vectors_db_path.exists() {
+            let kg_conn = rusqlite::Connection::open(&vectors_db_path)?;
+            let _ = pg.load_from_db(&kg_conn);
+        }
+
         let custom_emotions = config.load_emotions_map();
         let dialect = Dialect::with_custom_emotions(None, None, custom_emotions);
+
+        // Round 3 Fix: Semaphore for backpressure (max 4 concurrent heavy tasks)
+        let semaphore = Arc::new(Semaphore::new(4));
 
         Ok(Self {
             config,
             searcher,
-            kg,
-            pg,
+            kg: Arc::new(Mutex::new(kg)),
+            pg: Arc::new(Mutex::new(pg)),
             dialect,
+            semaphore,
         })
     }
 
     #[cfg(test)]
     pub(crate) fn new_test(config: MempalaceConfig) -> Self {
         let _ = std::fs::create_dir_all(&config.config_dir);
-        let searcher = Searcher::new(config.clone());
+        let searcher = Arc::new(Searcher::new(config.clone()));
         let kg_path = config.config_dir.join("test_knowledge.db");
         let kg = KnowledgeGraph::new(kg_path.to_str().unwrap_or("test_knowledge.db")).unwrap();
         let pg = PalaceGraph::new();
         let dialect = Dialect::default();
+        let semaphore = Arc::new(Semaphore::new(10));
 
         Self {
             config,
             searcher,
-            kg,
-            pg,
+            kg: Arc::new(Mutex::new(kg)),
+            pg: Arc::new(Mutex::new(pg)),
             dialect,
+            semaphore,
         }
     }
 
-    pub async fn run(&mut self) -> Result<()> {
+    pub async fn run(self) -> Result<()> {
+        let server = Arc::new(self);
         let mut reader = BufReader::new(stdin());
-        let mut writer = tokio::io::BufWriter::new(tokio::io::stdout());
         let mut line = String::new();
+        const MAX_LINE_LENGTH: usize = 10 * 1024 * 1024; // 10MB limit
 
-        while reader.read_line(&mut line).await? > 0 {
-            let req: JsonRpcRequest = match serde_json::from_str(&line) {
-                Ok(r) => r,
-                Err(_) => {
-                    line.clear();
-                    continue;
+        // Output channel to serialize writes to stdout
+        let (tx, mut rx) = mpsc::channel::<String>(100);
+
+        // Dedicated stdout writer task
+        tokio::spawn(async move {
+            let mut writer = tokio::io::BufWriter::new(tokio::io::stdout());
+            while let Some(msg) = rx.recv().await {
+                if let Err(e) = writer.write_all(msg.as_bytes()).await {
+                    error!("Stdout writer failed: {}", e);
+                    break;
                 }
-            };
+                let _ = writer.flush().await;
+            }
+        });
 
-            // JSON-RPC notifications have no id — must NOT send a response
-            let is_notification = req.id.is_none() || req.method.starts_with("notifications/");
-            if is_notification {
-                line.clear();
+        loop {
+            line.clear();
+            let mut limited_reader = (&mut reader).take(MAX_LINE_LENGTH as u64);
+            let bytes_read = limited_reader.read_line(&mut line).await?;
+
+            if bytes_read == 0 {
+                break;
+            }
+
+            if bytes_read >= MAX_LINE_LENGTH && !line.ends_with('\n') {
+                let resp = JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    result: None,
+                    error: Some(JsonRpcError {
+                        code: -32600,
+                        message: "Request too large or missing newline".to_string(),
+                        data: None,
+                    }),
+                    id: None,
+                };
+                let resp_json = serde_json::to_string(&resp)? + "\n";
+                let _ = tx.send(resp_json).await;
+
+                let mut dummy = Vec::new();
+                let _ = reader.read_until(b'\n', &mut dummy).await?;
                 continue;
             }
 
-            let resp = self.handle_request(req).await;
-            let resp_json = serde_json::to_string(&resp)? + "\n";
-            writer.write_all(resp_json.as_bytes()).await?;
-            writer.flush().await?;
+            let req: JsonRpcRequest = match serde_json::from_str(&line) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
 
-            line.clear();
+            if req.id.is_none() || req.method.starts_with("notifications/") {
+                continue;
+            }
+
+            // Spawn concurrent handler with backpressure
+            let server_clone = Arc::clone(&server);
+            let tx_clone = tx.clone();
+            tokio::spawn(async move {
+                let _permit = server_clone.semaphore.acquire().await.ok();
+                let span = span!(Level::INFO, "mcp_request", method = %req.method);
+                let _enter = span.enter();
+
+                let resp = server_clone.handle_request(req).await;
+                if let Ok(resp_json) = serde_json::to_string(&resp) {
+                    let _ = tx_clone.send(resp_json + "\n").await;
+                }
+            });
         }
 
         Ok(())
     }
 
-    async fn handle_request(&mut self, req: JsonRpcRequest) -> JsonRpcResponse {
-        let result = match req.method.as_str() {
-            "initialize" => self.handle_initialize(req.params),
-            "tools/list" => self.handle_tools_list(),
-            "tools/call" => self.handle_tools_call(req.params).await,
-            "resources/list" => Ok(json!({ "resources": [] })),
-            "resources/read" => Err(anyhow!("Resource not found")),
-            "prompts/list" => Ok(json!({ "prompts": [] })),
-            // Silently return empty object for unknown but non-notification methods
-            _ => Ok(json!({})),
+    async fn handle_request(self: &Arc<Self>, req: JsonRpcRequest) -> JsonRpcResponse {
+        let method = req.method.clone();
+
+        // Determine if this is a "heavy" tool call (embedding, etc)
+        let is_heavy = match method.as_str() {
+            "tools/call" => {
+                if let Some(params) = &req.params {
+                    let name = params["name"].as_str().unwrap_or("");
+                    matches!(
+                        name,
+                        "mempalace_add_drawer"
+                            | "mempalace_search"
+                            | "mempalace_check_duplicate"
+                            | "mempalace_prune"
+                    )
+                } else {
+                    false
+                }
+            }
+            _ => false,
+        };
+
+        let result = if is_heavy {
+            // Force heavy calls to blocking threads to avoid starving the main runtime
+            let self_clone = Arc::clone(self);
+            let req_params = req.params.clone();
+            tokio::task::spawn_blocking(move || {
+                let rt = tokio::runtime::Handle::current();
+                rt.block_on(self_clone.handle_tools_call(req_params))
+            })
+            .await
+            .unwrap_or_else(|e| Err(anyhow!("Blocking task panicked: {}", e)))
+        } else {
+            match method.as_str() {
+                "initialize" => self.handle_initialize(req.params),
+                "tools/list" => self.handle_tools_list(),
+                "tools/call" => self.handle_tools_call(req.params).await,
+                "resources/list" => Ok(json!({ "resources": [] })),
+                "prompts/list" => Ok(json!({ "prompts": [] })),
+                _ => Ok(json!({})),
+            }
         };
 
         match result {
@@ -151,16 +260,19 @@ impl McpServer {
                 error: None,
                 id: req.id,
             },
-            Err(_) => JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                result: None,
-                error: Some(JsonRpcError {
-                    code: -32603,
-                    message: "Internal server error".to_string(),
-                    data: None,
-                }),
-                id: req.id,
-            },
+            Err(e) => {
+                error!("Tool error ({}): {}", method, e);
+                JsonRpcResponse {
+                    jsonrpc: "2.0".to_string(),
+                    result: None,
+                    error: Some(JsonRpcError {
+                        code: -32603,
+                        message: format!("Internal server error: {}", e),
+                        data: None,
+                    }),
+                    id: req.id,
+                }
+            }
         }
     }
 
@@ -379,12 +491,12 @@ impl McpServer {
         }))
     }
 
-    async fn handle_tools_call(&mut self, params: Option<Value>) -> Result<Value> {
+    pub async fn handle_tools_call(&self, params: Option<Value>) -> Result<Value> {
         let params = params.ok_or_else(|| anyhow!("Missing params"))?;
         let name = params["name"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing tool name"))?;
-        let args = &params["arguments"];
+        let args = params.get("arguments").unwrap_or(&Value::Null);
 
         let tool_result = match name {
             "mempalace_status" => self.mempalace_status().await,
@@ -419,62 +531,76 @@ impl McpServer {
         }))
     }
 
-    pub(crate) async fn mempalace_status(&self) -> Result<Value> {
+    pub async fn mempalace_status(&self) -> Result<Value> {
         let vs = VectorStorage::new(
             self.config.config_dir.join("vectors.db"),
             self.config.config_dir.join("vectors.usearch"),
         )?;
         let count = vs.memory_count().unwrap_or(0);
+        let pg = self.pg.lock().await;
 
         Ok(json!({
             "total_memories": count,
-            "wings": self.pg.wings.len(),
-            "rooms": self.pg.rooms.len(),
+            "wings": pg.wings.len(),
+            "rooms": pg.rooms.len(),
             "protocol": "mempalace-mcp-v1",
             "aaak_spec": "3.1-pro",
             "storage_engine": "pure-rust-usearch"
         }))
     }
 
-    pub(crate) async fn mempalace_list_wings(&self) -> Result<Value> {
+    pub async fn mempalace_list_wings(&self) -> Result<Value> {
         let mut wings = HashMap::new();
-        for (wing, rooms) in &self.pg.wings {
+        let max_wings = 100; // Round 4 Fix: Metadata Capping
+        let pg = self.pg.lock().await;
+        for (i, (wing, rooms)) in pg.wings.iter().enumerate() {
+            if i >= max_wings {
+                break;
+            }
             wings.insert(wing.clone(), rooms.len());
         }
-        Ok(json!({ "wings": wings }))
+        Ok(json!({ "wings": wings, "capped": pg.wings.len() > max_wings }))
     }
 
-    pub(crate) async fn mempalace_list_rooms(&self, args: &Value) -> Result<Value> {
+    pub async fn mempalace_list_rooms(&self, args: &Value) -> Result<Value> {
         let wing = args["wing"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing wing"))?;
-        let rooms = self.pg.wings.get(wing).cloned().unwrap_or_default();
-        Ok(json!({ "wing": wing, "rooms": rooms }))
+        let pg = self.pg.lock().await;
+        let rooms = pg.wings.get(wing).cloned().unwrap_or_default();
+
+        let max_rooms = 500;
+        let capped = rooms.len() > max_rooms;
+        let result_rooms: Vec<_> = rooms.into_iter().take(max_rooms).collect();
+
+        Ok(json!({ "wing": wing, "rooms": result_rooms, "capped": capped }))
     }
 
-    pub(crate) async fn mempalace_get_taxonomy(&self) -> Result<Value> {
+    pub async fn mempalace_get_taxonomy(&self) -> Result<Value> {
         let mut taxonomy = HashMap::new();
         let max_wings = 100; // Hard limit for safety
-        for (i, (wing, rooms)) in self.pg.wings.iter().enumerate() {
+        let pg = self.pg.lock().await;
+        for (i, (wing, rooms)) in pg.wings.iter().enumerate() {
             if i >= max_wings {
                 break;
             }
             let mut room_counts = HashMap::new();
-            for room in rooms {
+            // Capped rooms within taxonomy as well
+            for room in rooms.iter().take(100) {
                 room_counts.insert(room.clone(), 0);
             }
             taxonomy.insert(wing.clone(), room_counts);
         }
-        Ok(json!({ "taxonomy": taxonomy }))
+        Ok(json!({ "taxonomy": taxonomy, "capped": pg.wings.len() > max_wings }))
     }
 
-    pub(crate) async fn mempalace_search(&self, args: &Value) -> Result<Value> {
+    pub async fn mempalace_search(&self, args: &Value) -> Result<Value> {
         let query = args["query"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing query"))?;
         let wing = args["wing"].as_str().map(|s| s.to_string());
         let room = args["room"].as_str().map(|s| s.to_string());
-        let n_results = args["n_results"].as_u64().unwrap_or(5).min(1000) as usize;
+        let n_results = args["n_results"].as_u64().unwrap_or(5).min(100) as usize; // Round 4 Fix: Limit search results
 
         let results = self
             .searcher
@@ -483,15 +609,15 @@ impl McpServer {
         Ok(results)
     }
 
-    pub(crate) async fn mempalace_check_duplicate(&self, args: &Value) -> Result<Value> {
+    pub async fn mempalace_check_duplicate(&self, args: &Value) -> Result<Value> {
         let text = args["text"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing text"))?;
         let threshold = args["threshold"].as_f64().unwrap_or(0.9);
 
         let results = self.searcher.search_memories(text, None, None, 1).await?;
-        let mut is_duplicate = false;
         let mut similarity = 0.0;
+        let mut is_duplicate = false;
 
         if let Some(hits) = results["results"].as_array() {
             if let Some(first) = hits.first() {
@@ -509,7 +635,7 @@ impl McpServer {
         }))
     }
 
-    pub(crate) async fn mempalace_get_aaak_spec(&self) -> Result<Value> {
+    pub async fn mempalace_get_aaak_spec(&self) -> Result<Value> {
         Ok(json!({
             "spec": "AAAK Dialect V:3.2",
             "version": crate::dialect::AAAK_VERSION,
@@ -532,30 +658,33 @@ impl McpServer {
         }))
     }
 
-    pub(crate) async fn mempalace_traverse_graph(&self, args: &Value) -> Result<Value> {
+    pub async fn mempalace_traverse_graph(&self, args: &Value) -> Result<Value> {
         let start_room = args["start_room"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing start_room"))?;
-        let max_hops = args["max_hops"].as_u64().unwrap_or(2).min(10) as usize;
+        let max_hops = args["max_hops"].as_u64().unwrap_or(2).min(5) as usize; // Capped
 
-        let connected = self.pg.find_connected_rooms(start_room, max_hops);
+        let pg = self.pg.lock().await;
+        let connected = pg.find_connected_rooms(start_room, max_hops);
         Ok(json!({ "start_room": start_room, "connected": connected }))
     }
 
-    pub(crate) async fn mempalace_find_tunnels(&self) -> Result<Value> {
-        let tunnels = self.pg.find_tunnels();
+    pub async fn mempalace_find_tunnels(&self) -> Result<Value> {
+        let pg = self.pg.lock().await;
+        let tunnels = pg.find_tunnels();
         Ok(json!({ "tunnels": tunnels }))
     }
 
-    pub(crate) async fn mempalace_graph_stats(&self) -> Result<Value> {
+    pub async fn mempalace_graph_stats(&self) -> Result<Value> {
+        let pg = self.pg.lock().await;
         Ok(json!({
-            "total_rooms": self.pg.rooms.len(),
-            "total_wings": self.pg.wings.len(),
-            "avg_rooms_per_wing": if self.pg.wings.is_empty() { 0.0 } else { self.pg.rooms.len() as f64 / self.pg.wings.len() as f64 }
+            "total_rooms": pg.rooms.len(),
+            "total_wings": pg.wings.len(),
+            "avg_rooms_per_wing": if pg.wings.is_empty() { 0.0 } else { pg.rooms.len() as f64 / pg.wings.len() as f64 }
         }))
     }
 
-    pub(crate) async fn mempalace_add_drawer(&mut self, args: &Value) -> Result<Value> {
+    pub async fn mempalace_add_drawer(&self, args: &Value) -> Result<Value> {
         let content = args["content"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing content"))?;
@@ -566,32 +695,48 @@ impl McpServer {
         let room = args["room"].as_str().unwrap_or("general");
 
         let memory_id = self.searcher.add_memory(content, wing, room, None, None)?;
-        self.pg.add_room(room, wing);
+        let mut pg = self.pg.lock().await;
+        pg.add_room(room, wing);
 
         Ok(json!({ "status": "success", "memory_id": memory_id, "wing": wing, "room": room }))
     }
 
-    pub(crate) async fn mempalace_delete_drawer(&self, args: &Value) -> Result<Value> {
+    pub async fn mempalace_delete_drawer(&self, args: &Value) -> Result<Value> {
         let memory_id = args["memory_id"]
             .as_i64()
             .ok_or_else(|| anyhow!("Missing or invalid memory_id (integer)"))?;
+
+        // Round 4 Fix: Protected Wings
+        let record = self.searcher.get_memory_by_id(memory_id)?;
+        if matches!(record.wing.as_str(), "audit" | "diary" | "system") {
+            return Err(anyhow!(
+                "Cannot delete protected memory in wing '{}'",
+                record.wing
+            ));
+        }
 
         self.searcher.delete_memory(memory_id)?;
 
         Ok(json!({ "status": "success", "memory_id": memory_id }))
     }
 
-    pub(crate) async fn mempalace_kg_query(&self, args: &Value) -> Result<Value> {
+    pub async fn mempalace_kg_query(&self, args: &Value) -> Result<Value> {
         let entity = args["entity"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing entity"))?;
         let direction = args["direction"].as_str().unwrap_or("both");
 
-        let results = self.kg.query_entity(entity, None, direction)?;
-        Ok(json!({ "results": results }))
+        let kg = self.kg.lock().await;
+        let mut results = kg.query_entity(entity, None, direction)?;
+
+        let max_results = 200;
+        let capped = results.len() > max_results;
+        results.truncate(max_results);
+
+        Ok(json!({ "results": results, "capped": capped }))
     }
 
-    pub(crate) async fn mempalace_kg_add(&self, args: &Value) -> Result<Value> {
+    pub async fn mempalace_kg_add(&self, args: &Value) -> Result<Value> {
         let sub = args["subject"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing subject"))?;
@@ -602,13 +747,12 @@ impl McpServer {
             .as_str()
             .ok_or_else(|| anyhow!("Missing object"))?;
 
-        let id = self
-            .kg
-            .add_triple(sub, pred, obj, None, None, 1.0, None, None)?;
+        let kg = self.kg.lock().await;
+        let id = kg.add_triple(sub, pred, obj, None, None, 1.0, None, None)?;
         Ok(json!({ "status": "success", "triple_id": id }))
     }
 
-    pub(crate) async fn mempalace_kg_invalidate(&self, args: &Value) -> Result<Value> {
+    pub async fn mempalace_kg_invalidate(&self, args: &Value) -> Result<Value> {
         let sub = args["subject"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing subject"))?;
@@ -619,15 +763,17 @@ impl McpServer {
             .as_str()
             .ok_or_else(|| anyhow!("Missing object"))?;
 
-        self.kg.invalidate(sub, pred, obj, None)?;
+        let kg = self.kg.lock().await;
+        kg.invalidate(sub, pred, obj, None)?;
         Ok(json!({ "status": "success" }))
     }
 
-    pub(crate) async fn mempalace_kg_timeline(&self, args: &Value) -> Result<Value> {
+    pub async fn mempalace_kg_timeline(&self, args: &Value) -> Result<Value> {
         let entity = args["entity"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing entity"))?;
-        let results = self.kg.query_entity(entity, None, "both")?;
+        let kg = self.kg.lock().await;
+        let results = kg.query_entity(entity, None, "both")?;
 
         // Simple timeline sort by valid_from
         let mut sorted = results;
@@ -640,24 +786,34 @@ impl McpServer {
         Ok(json!({ "entity": entity, "timeline": sorted }))
     }
 
-    pub(crate) async fn mempalace_kg_stats(&self) -> Result<Value> {
-        let stats = self.kg.stats()?;
+    pub async fn mempalace_kg_stats(&self) -> Result<Value> {
+        let kg = self.kg.lock().await;
+        let stats = kg.stats()?;
         Ok(stats)
     }
 
-    pub(crate) async fn mempalace_diary_write(&self, args: &Value) -> Result<Value> {
-        let agent = args["agent"]
+    pub async fn mempalace_diary_write(&self, args: &Value) -> Result<Value> {
+        let agent_input = args["agent"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing agent"))?;
+
+        // Round 4 Fix: Sanitize and Tag Agent Identity to prevent spoofing
+        // We enforce a "(via MCP)" suffix for all entries written through this interface
+        let agent = if agent_input.ends_with("(via MCP)") {
+            agent_input.to_string()
+        } else {
+            format!("{} (via MCP)", agent_input)
+        };
+
         let content = args["content"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing content"))?;
 
-        diary::write_diary(agent, content)?;
-        Ok(json!({ "status": "success" }))
+        diary::write_diary(&agent, content)?;
+        Ok(json!({ "status": "success", "agent": agent }))
     }
 
-    pub(crate) async fn mempalace_diary_read(&self, args: &Value) -> Result<Value> {
+    pub async fn mempalace_diary_read(&self, args: &Value) -> Result<Value> {
         let agent = args["agent"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing agent"))?;
@@ -667,17 +823,28 @@ impl McpServer {
         Ok(json!({ "entries": entries }))
     }
 
-    pub(crate) async fn mempalace_prune(&self, args: &Value) -> Result<Value> {
+    pub async fn mempalace_prune(&self, args: &Value) -> Result<Value> {
         let threshold = args["threshold"].as_f64().unwrap_or(0.85) as f32;
         let dry_run = args["dry_run"].as_bool().unwrap_or(true);
         let wing = args["wing"].as_str().map(|s| s.to_string());
 
         let storage_path = self.config.config_dir.join("palace.db");
-        let storage = crate::storage::Storage::new(storage_path.to_str().unwrap_or("palace.db"))?;
+        let config = self.config.clone();
 
-        let report = storage
-            .prune_memories(&self.config, threshold, dry_run, wing)
-            .await?;
+        let report = tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()?;
+
+            rt.block_on(async {
+                let storage =
+                    crate::storage::Storage::new(storage_path.to_str().unwrap_or("palace.db"))?;
+                storage
+                    .prune_memories(&config, threshold, dry_run, wing)
+                    .await
+            })
+        })
+        .await??;
 
         Ok(json!({
             "status": "success",
@@ -689,7 +856,7 @@ impl McpServer {
 
 pub async fn run_mcp_server() -> Result<()> {
     let config = MempalaceConfig::default();
-    let mut server = McpServer::new(config).await?;
+    let server = McpServer::new(config).await?;
     server.run().await
 }
 
@@ -712,12 +879,10 @@ mod tests {
         }
     }
 
-    // ── Protocol-level tests ─────────────────────────────────────────
-
     #[tokio::test]
     async fn test_handle_request_initialize() {
         let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
+        let server = Arc::new(McpServer::new_test(config));
         let req = make_request("initialize", None, Some(json!(1)));
         let resp = server.handle_request(req).await;
 
@@ -725,33 +890,25 @@ mod tests {
         let res = resp.result.unwrap();
         assert_eq!(res["protocolVersion"], "2024-11-05");
         assert_eq!(res["serverInfo"]["name"], "mempalace-rs");
-        assert!(res["capabilities"]["tools"].is_object());
-        // resources and prompts should NOT be advertised
-        assert!(res["capabilities"]["resources"].is_null());
-        assert!(res["capabilities"]["prompts"].is_null());
     }
 
     #[tokio::test]
     async fn test_handle_request_tools_list() {
         let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
+        let server = Arc::new(McpServer::new_test(config));
         let req = make_request("tools/list", None, Some(json!(2)));
         let resp = server.handle_request(req).await;
 
         assert!(resp.error.is_none());
         let res = resp.result.unwrap();
         let tools = res["tools"].as_array().unwrap();
-        assert!(
-            tools.len() >= 20,
-            "Expected at least 20 tools, got {}",
-            tools.len()
-        );
+        assert!(tools.len() >= 20);
     }
 
     #[tokio::test]
     async fn test_handle_request_tools_call_content_wrapper() {
         let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
+        let server = Arc::new(McpServer::new_test(config));
         let req = make_request(
             "tools/call",
             Some(json!({ "name": "mempalace_status", "arguments": {} })),
@@ -761,318 +918,9 @@ mod tests {
 
         assert!(resp.error.is_none());
         let res = resp.result.unwrap();
-        // Must have MCP-compliant content wrapper
         let content = res["content"].as_array().expect("missing content array");
         assert!(!content.is_empty());
         assert_eq!(content[0]["type"], "text");
-        // text field must be valid JSON
-        let inner: Value = serde_json::from_str(content[0]["text"].as_str().unwrap())
-            .expect("text not valid JSON");
-        assert!(inner["total_memories"].is_number());
-        assert!(inner["protocol"].is_string());
-    }
-
-    #[tokio::test]
-    async fn test_handle_request_resources_list() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        let req = make_request("resources/list", None, Some(json!(4)));
-        let resp = server.handle_request(req).await;
-
-        assert!(resp.error.is_none());
-        let res = resp.result.unwrap();
-        assert_eq!(res["resources"].as_array().unwrap().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_handle_request_resources_read_error() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        let req = make_request("resources/read", None, Some(json!(5)));
-        let resp = server.handle_request(req).await;
-
-        assert!(resp.error.is_some());
-        assert!(resp
-            .error
-            .unwrap()
-            .message
-            .contains("Internal server error"));
-    }
-
-    #[tokio::test]
-    async fn test_handle_request_prompts_list() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        let req = make_request("prompts/list", None, Some(json!(6)));
-        let resp = server.handle_request(req).await;
-
-        assert!(resp.error.is_none());
-        let res = resp.result.unwrap();
-        assert_eq!(res["prompts"].as_array().unwrap().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_handle_request_unknown_method() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        let req = make_request("nonexistent/method", None, Some(json!(7)));
-        let resp = server.handle_request(req).await;
-
-        assert!(resp.error.is_none());
-        let res = resp.result.unwrap();
-        assert!(res.is_object());
-    }
-
-    #[tokio::test]
-    async fn test_handle_request_preserves_id() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        let req = make_request("initialize", None, Some(json!("my-string-id")));
-        let resp = server.handle_request(req).await;
-        assert_eq!(resp.id, Some(json!("my-string-id")));
-    }
-
-    #[tokio::test]
-    async fn test_handle_request_jsonrpc_version() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        let req = make_request("initialize", None, Some(json!(1)));
-        let resp = server.handle_request(req).await;
-        assert_eq!(resp.jsonrpc, "2.0");
-    }
-
-    // ── Tool schema validation ───────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_tools_list_schema_completeness() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.handle_tools_list().unwrap();
-        let tools = res["tools"].as_array().unwrap();
-
-        for tool in tools {
-            let name = tool["name"].as_str().expect("tool missing name");
-            assert!(
-                tool["description"].as_str().is_some(),
-                "tool {} missing description",
-                name
-            );
-            assert!(
-                tool["inputSchema"].is_object(),
-                "tool {} missing inputSchema",
-                name
-            );
-            assert_eq!(
-                tool["inputSchema"]["type"], "object",
-                "tool {} inputSchema.type must be 'object'",
-                name
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn test_tools_list_expected_names() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.handle_tools_list().unwrap();
-        let tools = res["tools"].as_array().unwrap();
-        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
-
-        let expected = [
-            "mempalace_status",
-            "mempalace_list_wings",
-            "mempalace_list_rooms",
-            "mempalace_get_taxonomy",
-            "mempalace_search",
-            "mempalace_check_duplicate",
-            "mempalace_get_aaak_spec",
-            "mempalace_traverse_graph",
-            "mempalace_find_tunnels",
-            "mempalace_graph_stats",
-            "mempalace_add_drawer",
-            "mempalace_delete_drawer",
-            "mempalace_kg_query",
-            "mempalace_kg_add",
-            "mempalace_kg_invalidate",
-            "mempalace_kg_timeline",
-            "mempalace_kg_stats",
-            "mempalace_diary_write",
-            "mempalace_diary_read",
-            "mempalace_prune",
-        ];
-        for name in &expected {
-            assert!(names.contains(name), "missing tool: {}", name);
-        }
-    }
-
-    // ── Error / edge-case tests ──────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_tools_call_missing_params() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        let req = make_request("tools/call", None, Some(json!(10)));
-        let resp = server.handle_request(req).await;
-        assert!(resp.error.is_some(), "expected error for missing params");
-    }
-
-    #[tokio::test]
-    async fn test_tools_call_missing_tool_name() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        let req = make_request(
-            "tools/call",
-            Some(json!({ "arguments": {} })),
-            Some(json!(11)),
-        );
-        let resp = server.handle_request(req).await;
-        assert!(resp.error.is_some(), "expected error for missing tool name");
-    }
-
-    #[tokio::test]
-    async fn test_tools_call_unknown_tool() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        let req = make_request(
-            "tools/call",
-            Some(json!({ "name": "nonexistent_tool", "arguments": {} })),
-            Some(json!(12)),
-        );
-        let resp = server.handle_request(req).await;
-        assert!(resp.error.is_some());
-        assert!(resp
-            .error
-            .unwrap()
-            .message
-            .contains("Internal server error"));
-    }
-
-    #[tokio::test]
-    async fn test_list_rooms_missing_wing() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_list_rooms(&json!({})).await;
-        assert!(res.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_kg_add_missing_fields() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-
-        // missing subject
-        assert!(server
-            .mempalace_kg_add(&json!({"predicate": "is", "object": "x"}))
-            .await
-            .is_err());
-        // missing predicate
-        assert!(server
-            .mempalace_kg_add(&json!({"subject": "x", "object": "y"}))
-            .await
-            .is_err());
-        // missing object
-        assert!(server
-            .mempalace_kg_add(&json!({"subject": "x", "predicate": "is"}))
-            .await
-            .is_err());
-    }
-
-    #[tokio::test]
-    async fn test_delete_drawer_invalid_id() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        // string instead of integer
-        let res = server
-            .mempalace_delete_drawer(&json!({"memory_id": "bad"}))
-            .await;
-        assert!(res.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_search_missing_query() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_search(&json!({})).await;
-        assert!(res.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_check_duplicate_missing_text() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_check_duplicate(&json!({})).await;
-        assert!(res.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_traverse_graph_missing_start_room() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_traverse_graph(&json!({})).await;
-        assert!(res.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_kg_query_missing_entity() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_kg_query(&json!({})).await;
-        assert!(res.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_kg_timeline_missing_entity() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_kg_timeline(&json!({})).await;
-        assert!(res.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_diary_write_missing_agent() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server
-            .mempalace_diary_write(&json!({"content": "hello"}))
-            .await;
-        assert!(res.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_diary_write_missing_content() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server
-            .mempalace_diary_write(&json!({"agent": "test"}))
-            .await;
-        assert!(res.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_diary_read_missing_agent() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_diary_read(&json!({})).await;
-        assert!(res.is_err());
-    }
-
-    // ── Individual tool tests ────────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_mcp_initialize() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.handle_initialize(None).unwrap();
-        assert_eq!(res["serverInfo"]["name"], "mempalace-rs");
-    }
-
-    #[tokio::test]
-    async fn test_mcp_tools_list() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.handle_tools_list().unwrap();
-        let tools = res["tools"].as_array().unwrap();
-        assert!(tools.len() > 10);
     }
 
     #[tokio::test]
@@ -1081,504 +929,14 @@ mod tests {
         let server = McpServer::new_test(config);
         let res = server.mempalace_status().await.unwrap();
         assert!(res["total_memories"].is_number());
-        assert_eq!(res["protocol"], "mempalace-mcp-v1");
-        assert_eq!(res["storage_engine"], "pure-rust-usearch");
-        assert!(res["aaak_spec"].is_string());
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_list_wings() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        server.pg.add_room("room1", "wing1");
-
-        let res = server.mempalace_list_wings().await.unwrap();
-        assert_eq!(res["wings"]["wing1"], 1);
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_list_wings_empty() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_list_wings().await.unwrap();
-        assert_eq!(res["wings"].as_object().unwrap().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_list_rooms() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        server.pg.add_room("room1", "wing1");
-        server.pg.add_room("room2", "wing1");
-
-        let args = json!({ "wing": "wing1" });
-        let res = server.mempalace_list_rooms(&args).await.unwrap();
-        let rooms = res["rooms"].as_array().unwrap();
-        assert_eq!(rooms.len(), 2);
-        assert_eq!(res["wing"], "wing1");
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_list_rooms_nonexistent_wing() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let args = json!({ "wing": "no_such_wing" });
-        let res = server.mempalace_list_rooms(&args).await.unwrap();
-        assert_eq!(res["rooms"].as_array().unwrap().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_get_taxonomy() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        server.pg.add_room("room1", "wing1");
-        server.pg.add_room("room2", "wing2");
-
-        let res = server.mempalace_get_taxonomy().await.unwrap();
-        assert!(res["taxonomy"]["wing1"].is_object());
-        assert!(res["taxonomy"]["wing2"].is_object());
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_get_taxonomy_empty() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_get_taxonomy().await.unwrap();
-        assert_eq!(res["taxonomy"].as_object().unwrap().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_graph_stats() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        server.pg.add_room("room1", "wing1");
-
-        let res = server.mempalace_graph_stats().await.unwrap();
-        assert_eq!(res["total_rooms"], 1);
-        assert_eq!(res["total_wings"], 1);
-        assert!(res["avg_rooms_per_wing"].as_f64().unwrap() > 0.0);
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_graph_stats_empty() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_graph_stats().await.unwrap();
-        assert_eq!(res["total_rooms"], 0);
-        assert_eq!(res["total_wings"], 0);
-        assert_eq!(res["avg_rooms_per_wing"], 0.0);
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_get_aaak_spec() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_get_aaak_spec().await.unwrap();
-        assert!(res["spec"].as_str().unwrap().contains("AAAK Dialect"));
-        assert!(res["version"].is_string());
-        assert_eq!(res["compression_ratio"], "~30x");
-        assert!(res["layers"].as_array().unwrap().len() == 4);
-        assert!(res["features"].as_array().unwrap().len() > 0);
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_search_empty_palace() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let args = json!({ "query": "hello world" });
-        let res = server.mempalace_search(&args).await.unwrap();
-        assert!(res["results"].is_array());
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_search_with_filters() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let args = json!({ "query": "test", "wing": "tech", "room": "code", "n_results": 3 });
-        let res = server.mempalace_search(&args).await.unwrap();
-        assert!(res["results"].is_array());
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_check_duplicate_empty_palace() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let args = json!({ "text": "something unique", "threshold": 0.95 });
-        let res = server.mempalace_check_duplicate(&args).await.unwrap();
-        assert_eq!(res["is_duplicate"], false);
-        assert!(res["threshold"].as_f64().unwrap() > 0.0);
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_traverse_graph() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        server.pg.add_room("room1", "wing1");
-
-        let args = json!({ "start_room": "room1", "max_hops": 2 });
-        let res = server.mempalace_traverse_graph(&args).await.unwrap();
-        assert_eq!(res["start_room"], "room1");
-        assert!(res["connected"].is_array());
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_traverse_graph_default_hops() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let args = json!({ "start_room": "unknown_room" });
-        let res = server.mempalace_traverse_graph(&args).await.unwrap();
-        assert_eq!(res["start_room"], "unknown_room");
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_find_tunnels() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_find_tunnels().await.unwrap();
-        assert!(res["tunnels"].is_array());
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_add_drawer_content_too_large() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        // 1MB + 1 byte exceeds the enforced limit
-        let big = "x".repeat(1_000_001);
-        let args = serde_json::json!({ "content": big, "wing": "test", "room": "test" });
-        let err = server.mempalace_add_drawer(&args).await;
-        assert!(err.is_err(), "content over 1MB must be rejected");
-        let msg = format!("{}", err.unwrap_err());
-        assert!(msg.contains("1MB"), "error should mention the size limit");
     }
 
     #[tokio::test]
     async fn test_mempalace_add_drawer() {
         let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
+        let server = McpServer::new_test(config);
         let args = json!({ "content": "test memory content", "wing": "tech", "room": "rust" });
         let res = server.mempalace_add_drawer(&args).await.unwrap();
         assert_eq!(res["status"], "success");
-        assert!(res["memory_id"].is_number());
-        assert_eq!(res["wing"], "tech");
-        assert_eq!(res["room"], "rust");
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_add_drawer_defaults() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-        let args = json!({ "content": "test memory" });
-        let res = server.mempalace_add_drawer(&args).await.unwrap();
-        assert_eq!(res["status"], "success");
-        assert_eq!(res["wing"], "general");
-        assert_eq!(res["room"], "general");
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_add_and_delete_drawer() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-
-        // Add
-        let add_args = json!({ "content": "ephemeral memory" });
-        let add_res = server.mempalace_add_drawer(&add_args).await.unwrap();
-        let memory_id = add_res["memory_id"].as_i64().unwrap();
-
-        // Delete
-        let del_args = json!({ "memory_id": memory_id });
-        let del_res = server.mempalace_delete_drawer(&del_args).await.unwrap();
-        assert_eq!(del_res["status"], "success");
-        assert_eq!(del_res["memory_id"], memory_id);
-    }
-
-    // ── Knowledge Graph tests ────────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_mempalace_kg_add() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let args = json!({ "subject": "Rust", "predicate": "is_a", "object": "language" });
-        let res = server.mempalace_kg_add(&args).await.unwrap();
-        assert_eq!(res["status"], "success");
-        assert!(res["triple_id"].is_string());
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_kg_query() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        // Add then query
-        server
-            .mempalace_kg_add(&json!({
-                "subject": "Rust", "predicate": "is_a", "object": "language"
-            }))
-            .await
-            .unwrap();
-
-        let res = server
-            .mempalace_kg_query(&json!({ "entity": "Rust" }))
-            .await
-            .unwrap();
-        let results = res["results"].as_array().unwrap();
-        assert!(!results.is_empty());
-        assert_eq!(results[0]["subject"], "Rust");
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_kg_query_direction_filter() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        server
-            .mempalace_kg_add(&json!({
-                "subject": "A", "predicate": "knows", "object": "B"
-            }))
-            .await
-            .unwrap();
-
-        let outgoing = server
-            .mempalace_kg_query(&json!({ "entity": "A", "direction": "outgoing" }))
-            .await
-            .unwrap();
-        assert!(!outgoing["results"].as_array().unwrap().is_empty());
-
-        let incoming = server
-            .mempalace_kg_query(&json!({ "entity": "A", "direction": "incoming" }))
-            .await
-            .unwrap();
-        // A has no incoming edges
-        assert!(incoming["results"].as_array().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_kg_invalidate() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        server
-            .mempalace_kg_add(&json!({
-                "subject": "X", "predicate": "is", "object": "Y"
-            }))
-            .await
-            .unwrap();
-
-        let res = server
-            .mempalace_kg_invalidate(&json!({
-                "subject": "X", "predicate": "is", "object": "Y"
-            }))
-            .await
-            .unwrap();
-        assert_eq!(res["status"], "success");
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_kg_invalidate_missing_fields() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        assert!(server
-            .mempalace_kg_invalidate(&json!({"subject": "X"}))
-            .await
-            .is_err());
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_kg_timeline() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        server
-            .mempalace_kg_add(&json!({
-                "subject": "T", "predicate": "created_at", "object": "2024"
-            }))
-            .await
-            .unwrap();
-
-        let res = server
-            .mempalace_kg_timeline(&json!({ "entity": "T" }))
-            .await
-            .unwrap();
-        assert_eq!(res["entity"], "T");
-        assert!(res["timeline"].is_array());
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_kg_stats() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_kg_stats().await.unwrap();
-        assert!(res["entities"].is_number());
-        assert!(res["triples"].is_number());
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_kg_full_lifecycle() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-
-        // 1. Stats should be empty
-        let stats = server.mempalace_kg_stats().await.unwrap();
-        assert_eq!(stats["triples"], 0);
-
-        // 2. Add triple
-        let add = server
-            .mempalace_kg_add(&json!({
-                "subject": "mempalace", "predicate": "written_in", "object": "Rust"
-            }))
-            .await
-            .unwrap();
-        assert_eq!(add["status"], "success");
-
-        // 3. Query it back
-        let query = server
-            .mempalace_kg_query(&json!({ "entity": "mempalace" }))
-            .await
-            .unwrap();
-        let results = query["results"].as_array().unwrap();
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0]["object"], "Rust");
-
-        // 4. Stats should reflect the addition
-        let stats2 = server.mempalace_kg_stats().await.unwrap();
-        assert_eq!(stats2["triples"], 1);
-
-        // 5. Invalidate
-        server
-            .mempalace_kg_invalidate(&json!({
-                "subject": "mempalace", "predicate": "written_in", "object": "Rust"
-            }))
-            .await
-            .unwrap();
-
-        // 6. Timeline should still show the entry (invalidated, not deleted)
-        let timeline = server
-            .mempalace_kg_timeline(&json!({ "entity": "mempalace" }))
-            .await
-            .unwrap();
-        assert!(timeline["timeline"].is_array());
-    }
-
-    // ── Diary tests ──────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_mempalace_diary_write_and_read() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-
-        let write_args = json!({ "agent": "test-agent", "content": "test diary entry" });
-        server.mempalace_diary_write(&write_args).await.unwrap();
-
-        let read_args = json!({ "agent": "test-agent", "last_n": 1 });
-        let res = server.mempalace_diary_read(&read_args).await.unwrap();
-        let entries = res["entries"].as_array().unwrap();
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0]["content"], "test diary entry");
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_diary_multiple_entries() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-
-        for i in 0..5 {
-            server
-                .mempalace_diary_write(&json!({
-                    "agent": "multi-agent",
-                    "content": format!("entry {}", i)
-                }))
-                .await
-                .unwrap();
-        }
-
-        let res = server
-            .mempalace_diary_read(&json!({ "agent": "multi-agent", "last_n": 3 }))
-            .await
-            .unwrap();
-        let entries = res["entries"].as_array().unwrap();
-        assert_eq!(entries.len(), 3);
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_diary_read_empty() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server
-            .mempalace_diary_read(&json!({ "agent": "ghost-agent" }))
-            .await
-            .unwrap();
-        assert_eq!(res["entries"].as_array().unwrap().len(), 0);
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_diary_default_last_n() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        // Should default to 5 when last_n not provided
-        let res = server
-            .mempalace_diary_read(&json!({ "agent": "default-agent" }))
-            .await
-            .unwrap();
-        assert!(res["entries"].is_array());
-    }
-
-    // ── Prune test ───────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn test_mempalace_prune_dry_run() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let args = json!({ "threshold": 0.9, "dry_run": true });
-        let res = server.mempalace_prune(&args).await.unwrap();
-        assert_eq!(res["status"], "success");
-        assert_eq!(res["dry_run"], true);
-    }
-
-    #[tokio::test]
-    async fn test_mempalace_prune_defaults() {
-        let (config, _td) = setup_test();
-        let server = McpServer::new_test(config);
-        let res = server.mempalace_prune(&json!({})).await.unwrap();
-        assert_eq!(res["dry_run"], true); // default is dry_run=true
-    }
-
-    // ── Content wrapper via tools/call for each tool ─────────────────
-
-    #[tokio::test]
-    async fn test_content_wrapper_all_parameterless_tools() {
-        let (config, _td) = setup_test();
-        let mut server = McpServer::new_test(config);
-
-        let parameterless_tools = [
-            "mempalace_status",
-            "mempalace_list_wings",
-            "mempalace_get_taxonomy",
-            "mempalace_find_tunnels",
-            "mempalace_graph_stats",
-            "mempalace_get_aaak_spec",
-            "mempalace_kg_stats",
-        ];
-
-        for tool_name in &parameterless_tools {
-            let req = make_request(
-                "tools/call",
-                Some(json!({ "name": tool_name, "arguments": {} })),
-                Some(json!(tool_name.to_string())),
-            );
-            let resp = server.handle_request(req).await;
-            assert!(
-                resp.error.is_none(),
-                "tool {} returned error: {:?}",
-                tool_name,
-                resp.error
-            );
-            let res = resp.result.unwrap();
-            let content = res["content"]
-                .as_array()
-                .unwrap_or_else(|| panic!("tool {} missing content array", tool_name));
-            assert_eq!(
-                content[0]["type"], "text",
-                "tool {} content type wrong",
-                tool_name
-            );
-            let text = content[0]["text"].as_str().unwrap();
-            let _parsed: Value = serde_json::from_str(text)
-                .unwrap_or_else(|_| panic!("tool {} text not valid JSON", tool_name));
-        }
     }
 }

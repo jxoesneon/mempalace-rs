@@ -144,4 +144,3 @@ fn test_config_init_and_save() {
     let content2 = fs::read_to_string(&people_file).unwrap();
     assert!(!content2.contains("Bob"));
 }
-

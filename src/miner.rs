@@ -46,13 +46,13 @@ pub fn chunk_text(content: &str) -> Vec<String> {
         while start < content.len() && !content.is_char_boundary(start) {
             start += 1;
         }
-        
+
         if start >= content.len() {
             break;
         }
 
         let mut end = std::cmp::min(start + CHUNK_SIZE, content.len());
-        
+
         // Find nearest char boundary for end BEFORE any slicing
         while end > start && !content.is_char_boundary(end) {
             end -= 1;
@@ -72,7 +72,7 @@ pub fn chunk_text(content: &str) -> Vec<String> {
                 }
             }
         }
-        
+
         // Re-ensure end is at a char boundary after searching for newlines
         while end > start && !content.is_char_boundary(end) {
             end -= 1;
@@ -86,14 +86,18 @@ pub fn chunk_text(content: &str) -> Vec<String> {
         if end >= content.len() {
             break;
         }
-        
+
         // Compute overlap and ensure start is at a char boundary
         let next_start = if end > CHUNK_OVERLAP {
             let mut s = end - CHUNK_OVERLAP;
             while s < end && !content.is_char_boundary(s) {
                 s += 1;
             }
-            if s >= end { end } else { s }
+            if s >= end {
+                end
+            } else {
+                s
+            }
         } else {
             0
         };
@@ -325,9 +329,10 @@ pub async fn mine_project(
     let wing_name = options
         .wing_override
         .unwrap_or_else(|| "general".to_string());
-    println!(
+    tracing::info!(
         "Mining project files in: {:?} into wing: {}",
-        project_path, wing_name
+        project_path,
+        wing_name
     );
 
     let wing = Wing {
@@ -352,6 +357,14 @@ pub async fn mine_project(
     )?;
 
     let mut processed_files = 0;
+    const BATCH_SIZE: usize = 32;
+
+    let mut batch_texts = Vec::new();
+    let mut batch_wings = Vec::new();
+    let mut batch_rooms = Vec::new();
+    let mut batch_sources = Vec::new();
+    let mut batch_mtimes = Vec::new();
+
     for path in files {
         if let Some(l) = options.limit {
             if processed_files >= l {
@@ -387,18 +400,33 @@ pub async fn mine_project(
                 &project_path,
             ) {
                 let mut count = 0usize;
-                for (doc, mut meta) in documents.iter().zip(metadatas.into_iter()) {
+                for (doc, mut meta) in documents.into_iter().zip(metadatas.into_iter()) {
                     if let Some(agent_name) = &options.agent {
                         meta.insert("author".to_string(), json!(agent_name));
                     }
+
                     if !options.dry_run {
-                        vs.add_memory(
-                            doc,
-                            &wing_name,
-                            &room,
-                            Some(&source_file),
-                            Some(current_mtime),
-                        )?;
+                        batch_texts.push(doc);
+                        batch_wings.push(wing_name.clone());
+                        batch_rooms.push(room.clone());
+                        batch_sources.push(Some(source_file.clone()));
+                        batch_mtimes.push(Some(current_mtime));
+
+                        if batch_texts.len() >= BATCH_SIZE {
+                            vs.add_memories_batch(
+                                std::mem::take(&mut batch_texts),
+                                std::mem::take(&mut batch_wings),
+                                std::mem::take(&mut batch_rooms),
+                                std::mem::take(&mut batch_sources),
+                                std::mem::take(&mut batch_mtimes),
+                            )?;
+
+                            // Periodic save to prevent data loss on crash
+                            processed_files += 1; // Reuse for batch count
+                            if processed_files % 10 == 0 {
+                                vs.save_index(config.config_dir.join("vectors.usearch"))?;
+                            }
+                        }
                     }
                     count += 1;
                 }
@@ -422,6 +450,16 @@ pub async fn mine_project(
     }
 
     if !options.dry_run {
+        // Flush remaining batch
+        if !batch_texts.is_empty() {
+            vs.add_memories_batch(
+                batch_texts,
+                batch_wings,
+                batch_rooms,
+                batch_sources,
+                batch_mtimes,
+            )?;
+        }
         vs.save_index(config.config_dir.join("vectors.usearch"))?;
     }
 

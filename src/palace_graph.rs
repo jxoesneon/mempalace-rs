@@ -13,6 +13,20 @@ impl PalaceGraph {
         Self::default()
     }
 
+    /// Reload taxonomy (wings and rooms) from the persistent memory store.
+    pub fn load_from_db(&mut self, conn: &rusqlite::Connection) -> Result<(), rusqlite::Error> {
+        let mut stmt = conn.prepare("SELECT DISTINCT wing, room FROM memories")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        for row in rows {
+            let (wing, room) = row?;
+            self.add_room(&room, &wing);
+        }
+        Ok(())
+    }
+
     pub fn add_room(&mut self, room: &str, wing: &str) {
         self.rooms
             .entry(room.to_string())

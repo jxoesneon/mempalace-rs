@@ -158,7 +158,7 @@ pub fn write_diary(agent: &str, content: &str) -> Result<()> {
     let path = get_diary_path();
     let diary = Diary::new(&path)?;
     let id = diary.write_entry(agent, content)?;
-    println!("✓ Diary entry {} written for agent {}", id, agent);
+    tracing::info!("✓ Diary entry {} written for agent {}", id, agent);
     Ok(())
 }
 

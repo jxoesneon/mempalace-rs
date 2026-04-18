@@ -1,4 +1,5 @@
-use rusqlite::{params, Connection, Result};
+use anyhow::{anyhow, Result};
+use rusqlite::{params, Connection};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -10,18 +11,22 @@ impl KnowledgeGraph {
     pub fn new(path: &str) -> Result<Self> {
         if path != ":memory:" {
             if let Some(parent) = Path::new(path).parent() {
-                let _ = std::fs::create_dir_all(parent);
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| anyhow!("Failed to create directory for KG: {}", e))?;
+                }
             }
         }
-        let conn = Connection::open(path)?;
+        let conn = Connection::open(path).map_err(|e| anyhow!("Failed to open KG DB: {}", e))?;
         let kg = KnowledgeGraph { conn };
         kg._init_db()?;
         Ok(kg)
     }
 
     fn _init_db(&self) -> Result<()> {
-        self.conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS entities (
+        self.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS entities (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 type TEXT DEFAULT 'unknown',
@@ -48,7 +53,8 @@ impl KnowledgeGraph {
             CREATE INDEX IF NOT EXISTS idx_triples_object ON triples(object);
             CREATE INDEX IF NOT EXISTS idx_triples_predicate ON triples(predicate);
             CREATE INDEX IF NOT EXISTS idx_triples_valid ON triples(valid_from, valid_to);",
-        )?;
+            )
+            .map_err(|e| anyhow!("Failed to initialize KG DB: {}", e))?;
         Ok(())
     }
 
@@ -67,7 +73,7 @@ impl KnowledgeGraph {
         self.conn.execute(
             "INSERT OR REPLACE INTO entities (id, name, type, properties) VALUES (?1, ?2, ?3, ?4)",
             params![eid, name, entity_type, props],
-        )?;
+        ).map_err(|e| anyhow!("Failed to add entity: {}", e))?;
         Ok(eid)
     }
 
@@ -88,22 +94,33 @@ impl KnowledgeGraph {
         let pred = predicate.to_lowercase().replace(' ', "_");
 
         // Auto-create entities if they don't exist
-        self.conn.execute(
-            "INSERT OR IGNORE INTO entities (id, name) VALUES (?1, ?2)",
-            params![sub_id, subject],
-        )?;
-        self.conn.execute(
-            "INSERT OR IGNORE INTO entities (id, name) VALUES (?1, ?2)",
-            params![obj_id, obj],
-        )?;
+        self.conn
+            .execute(
+                "INSERT OR IGNORE INTO entities (id, name) VALUES (?1, ?2)",
+                params![sub_id, subject],
+            )
+            .map_err(|e| anyhow!("Failed to ensure subject entity: {}", e))?;
+        self.conn
+            .execute(
+                "INSERT OR IGNORE INTO entities (id, name) VALUES (?1, ?2)",
+                params![obj_id, obj],
+            )
+            .map_err(|e| anyhow!("Failed to ensure object entity: {}", e))?;
 
         // Check for existing identical triple
         let mut stmt = self.conn.prepare(
             "SELECT id FROM triples WHERE subject=?1 AND predicate=?2 AND object=?3 AND valid_to IS NULL"
-        )?;
-        let mut rows = stmt.query(params![sub_id, pred, obj_id])?;
-        if let Some(row) = rows.next()? {
-            return row.get(0);
+        ).map_err(|e| anyhow!("Failed to prepare triple existence check: {}", e))?;
+        let mut rows = stmt
+            .query(params![sub_id, pred, obj_id])
+            .map_err(|e| anyhow!("Failed to query triple existence: {}", e))?;
+        if let Some(row) = rows
+            .next()
+            .map_err(|e| anyhow!("Failed to read triple row: {}", e))?
+        {
+            return row
+                .get(0)
+                .map_err(|e| anyhow!("Failed to get triple ID: {}", e));
         }
 
         let triple_id = format!(
@@ -128,7 +145,7 @@ impl KnowledgeGraph {
                 source_closet,
                 source_file,
             ],
-        )?;
+        ).map_err(|e| anyhow!("Failed to insert triple: {}", e))?;
         Ok(triple_id)
     }
 
@@ -161,7 +178,7 @@ impl KnowledgeGraph {
         self.conn.execute(
             "UPDATE triples SET valid_to=?1 WHERE subject=?2 AND predicate=?3 AND object=?4 AND valid_to IS NULL",
             params![end_date, sub_id, pred, obj_id],
-        )?;
+        ).map_err(|e| anyhow!("Failed to invalidate triple: {}", e))?;
         Ok(())
     }
 
@@ -183,23 +200,28 @@ impl KnowledgeGraph {
                 params_vec.push(date.to_string());
             }
 
-            let mut stmt = self.conn.prepare(&query)?;
-            let rows = stmt.query_map(rusqlite::params_from_iter(params_vec.iter()), |row| {
-                Ok(json!({
-                    "direction": "outgoing",
-                    "subject": name,
-                    "predicate": row.get::<_, String>(2)?,
-                    "object": row.get::<_, String>(10)?,
-                    "valid_from": row.get::<_, Option<String>>(4)?,
-                    "valid_to": row.get::<_, Option<String>>(5)?,
-                    "confidence": row.get::<_, f64>(6)?,
-                    "source_closet": row.get::<_, Option<String>>(7)?,
-                    "current": row.get::<_, Option<String>>(5)?.is_none(),
-                }))
-            })?;
+            let mut stmt = self
+                .conn
+                .prepare(&query)
+                .map_err(|e| anyhow!("Failed to prepare outgoing query: {}", e))?;
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(params_vec.iter()), |row| {
+                    Ok(json!({
+                        "direction": "outgoing",
+                        "subject": name,
+                        "predicate": row.get::<_, String>(2)?,
+                        "object": row.get::<_, String>(10)?,
+                        "valid_from": row.get::<_, Option<String>>(4)?,
+                        "valid_to": row.get::<_, Option<String>>(5)?,
+                        "confidence": row.get::<_, f64>(6)?,
+                        "source_closet": row.get::<_, Option<String>>(7)?,
+                        "current": row.get::<_, Option<String>>(5)?.is_none(),
+                    }))
+                })
+                .map_err(|e| anyhow!("Failed to execute outgoing query: {}", e))?;
 
             for row in rows {
-                results.push(row?);
+                results.push(row.map_err(|e| anyhow!("Failed to read outgoing row: {}", e))?);
             }
         }
 
@@ -212,23 +234,28 @@ impl KnowledgeGraph {
                 params_vec.push(date.to_string());
             }
 
-            let mut stmt = self.conn.prepare(&query)?;
-            let rows = stmt.query_map(rusqlite::params_from_iter(params_vec.iter()), |row| {
-                Ok(json!({
-                    "direction": "incoming",
-                    "subject": row.get::<_, String>(10)?,
-                    "predicate": row.get::<_, String>(2)?,
-                    "object": name,
-                    "valid_from": row.get::<_, Option<String>>(4)?,
-                    "valid_to": row.get::<_, Option<String>>(5)?,
-                    "confidence": row.get::<_, f64>(6)?,
-                    "source_closet": row.get::<_, Option<String>>(7)?,
-                    "current": row.get::<_, Option<String>>(5)?.is_none(),
-                }))
-            })?;
+            let mut stmt = self
+                .conn
+                .prepare(&query)
+                .map_err(|e| anyhow!("Failed to prepare incoming query: {}", e))?;
+            let rows = stmt
+                .query_map(rusqlite::params_from_iter(params_vec.iter()), |row| {
+                    Ok(json!({
+                        "direction": "incoming",
+                        "subject": row.get::<_, String>(10)?,
+                        "predicate": row.get::<_, String>(2)?,
+                        "object": name,
+                        "valid_from": row.get::<_, Option<String>>(4)?,
+                        "valid_to": row.get::<_, Option<String>>(5)?,
+                        "confidence": row.get::<_, f64>(6)?,
+                        "source_closet": row.get::<_, Option<String>>(7)?,
+                        "current": row.get::<_, Option<String>>(5)?.is_none(),
+                    }))
+                })
+                .map_err(|e| anyhow!("Failed to execute incoming query: {}", e))?;
 
             for row in rows {
-                results.push(row?);
+                results.push(row.map_err(|e| anyhow!("Failed to read incoming row: {}", e))?);
             }
         }
 
@@ -243,13 +270,15 @@ impl KnowledgeGraph {
             .query_row("SELECT COUNT(*) FROM entities", [], |row| {
                 entity_count = row.get(0)?;
                 Ok(())
-            })?;
+            })
+            .map_err(|e| anyhow!("Failed to get entity count: {}", e))?;
 
         self.conn
             .query_row("SELECT COUNT(*) FROM triples", [], |row| {
                 triple_count = row.get(0)?;
                 Ok(())
-            })?;
+            })
+            .map_err(|e| anyhow!("Failed to get triple count: {}", e))?;
 
         Ok(json!({
             "entities": entity_count,
