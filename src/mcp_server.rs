@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::fs;
 use std::sync::Arc;
 use tokio::io::{stdin, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, Mutex, Semaphore};
@@ -692,11 +693,27 @@ impl McpServer {
             return Err(anyhow!("Content exceeds maximum size of 1MB"));
         }
         let wing = args["wing"].as_str().unwrap_or("general");
-        let room = args["room"].as_str().unwrap_or("general");
+        let room = match args["room"].as_str() {
+            Some(r) => r.to_string(),
+            None => crate::miner::detect_hall(content, &self.config),
+        };
 
-        let memory_id = self.searcher.add_memory(content, wing, room, None, None)?;
+        self.wal_log(
+            "add_drawer",
+            json!({
+                "wing": wing,
+                "room": room,
+                "content_len": content.len(),
+                "content_preview": &content[..content.len().min(100)]
+            }),
+        )
+        .await;
+
+        let memory_id = self
+            .searcher
+            .add_memory(content, wing, &room, None, None)?;
         let mut pg = self.pg.lock().await;
-        pg.add_room(room, wing);
+        pg.add_room(&room, wing);
 
         Ok(json!({ "status": "success", "memory_id": memory_id, "wing": wing, "room": room }))
     }
@@ -705,6 +722,9 @@ impl McpServer {
         let memory_id = args["memory_id"]
             .as_i64()
             .ok_or_else(|| anyhow!("Missing or invalid memory_id (integer)"))?;
+
+        self.wal_log("delete_drawer", json!({ "memory_id": memory_id }))
+            .await;
 
         // Round 4 Fix: Protected Wings
         let record = self.searcher.get_memory_by_id(memory_id)?;
@@ -747,6 +767,12 @@ impl McpServer {
             .as_str()
             .ok_or_else(|| anyhow!("Missing object"))?;
 
+        self.wal_log(
+            "kg_add",
+            json!({ "subject": sub, "predicate": pred, "object": obj }),
+        )
+        .await;
+
         let kg = self.kg.lock().await;
         let id = kg.add_triple(sub, pred, obj, None, None, 1.0, None, None)?;
         Ok(json!({ "status": "success", "triple_id": id }))
@@ -762,6 +788,12 @@ impl McpServer {
         let obj = args["object"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing object"))?;
+
+        self.wal_log(
+            "kg_invalidate",
+            json!({ "subject": sub, "predicate": pred, "object": obj }),
+        )
+        .await;
 
         let kg = self.kg.lock().await;
         kg.invalidate(sub, pred, obj, None)?;
@@ -851,6 +883,31 @@ impl McpServer {
             "dry_run": dry_run,
             "report": report
         }))
+    }
+
+    async fn wal_log(&self, operation: &str, params: Value) {
+        let wal_dir = self.config.config_dir.join("wal");
+        let _ = fs::create_dir_all(&wal_dir);
+        let wal_file = wal_dir.join("write_log.jsonl");
+
+        let entry = json!({
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "operation": operation,
+            "params": params
+        });
+
+        if let Ok(line) = serde_json::to_string(&entry) {
+            use tokio::io::AsyncWriteExt;
+            if let Ok(mut file) = tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(wal_file)
+                .await
+            {
+                let _ = file.write_all(line.as_bytes()).await;
+                let _ = file.write_all(b"\n").await;
+            }
+        }
     }
 }
 

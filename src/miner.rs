@@ -128,11 +128,6 @@ pub fn detect_room(
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_lowercase();
-    let content_lower = content
-        .chars()
-        .take(2000)
-        .collect::<String>()
-        .to_lowercase();
 
     // Priority 1: folder path contains room name
     let path_parts: Vec<&str> = relative.split(['/', '\\']).collect();
@@ -157,15 +152,25 @@ pub fn detect_room(
         }
     }
 
-    // Priority 3: keyword scoring
+    // Priority 3: keyword scoring (Halls)
+    detect_hall(content, config)
+}
+
+pub fn detect_hall(content: &str, config: &MempalaceConfig) -> String {
+    let content_lower = content
+        .chars()
+        .take(5000) // Scan deeper for halls
+        .collect::<String>()
+        .to_lowercase();
+
     let mut scores = HashMap::new();
-    for (wing, keywords) in &config.hall_keywords {
+    for (hall, keywords) in &config.hall_keywords {
         let mut score = 0;
         for kw in keywords {
             score += content_lower.matches(&kw.to_lowercase()).count();
         }
         if score > 0 {
-            scores.insert(wing.clone(), score);
+            scores.insert(hall.clone(), score);
         }
     }
 
