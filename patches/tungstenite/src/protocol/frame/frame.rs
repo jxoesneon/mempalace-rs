@@ -17,12 +17,21 @@ use super::{
 use crate::error::{Error, ProtocolError, Result};
 
 /// A struct representing the close command.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct CloseFrame<'t> {
     /// The reason as a code.
     pub code: CloseCode,
     /// The reason as text string.
     pub reason: Cow<'t, str>,
+}
+
+impl<'t> fmt::Debug for CloseFrame<'t> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CloseFrame")
+            .field("code", &self.code)
+            .field("reason", &format_args!("<{} bytes>", self.reason.len()))
+            .finish()
+    }
 }
 
 impl<'t> CloseFrame<'t> {
@@ -34,7 +43,7 @@ impl<'t> CloseFrame<'t> {
 
 impl<'t> fmt::Display for CloseFrame<'t> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} ({})", self.reason, self.code)
+        write!(f, "code: {}", self.code)
     }
 }
 
@@ -141,7 +150,7 @@ impl FrameHeader {
             if cursor.read(&mut head)? != 2 {
                 return Ok(None);
             }
-            trace!("Parsed headers {:?}", head);
+            trace!("Parsed frame head");
             (head[0], head[1])
         };
 
@@ -204,10 +213,19 @@ impl FrameHeader {
 }
 
 /// A struct representing a WebSocket frame.
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct Frame {
     header: FrameHeader,
     payload: Vec<u8>,
+}
+
+impl fmt::Debug for Frame {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Frame")
+            .field("header", &self.header)
+            .field("payload", &format_args!("<{} bytes>", self.payload.len()))
+            .finish()
+    }
 }
 
 impl Frame {
@@ -370,8 +388,6 @@ impl Frame {
 
 impl fmt::Display for Frame {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        use std::fmt::Write;
-
         write!(
             f,
             "
@@ -381,7 +397,6 @@ reserved: {} {} {}
 opcode: {}
 length: {}
 payload length: {}
-payload: 0x{}
             ",
             self.header.is_final,
             self.header.rsv1,
@@ -391,10 +406,6 @@ payload: 0x{}
             // self.mask.map(|mask| format!("{:?}", mask)).unwrap_or("NONE".into()),
             self.len(),
             self.payload.len(),
-            self.payload.iter().fold(String::new(), |mut output, byte| {
-                _ = write!(output, "{byte:02x}");
-                output
-            })
         )
     }
 }
@@ -481,6 +492,6 @@ mod tests {
     fn display() {
         let f = Frame::message("hi there".into(), OpCode::Data(Data::Text), true);
         let view = format!("{}", f);
-        assert!(view.contains("payload:"));
+        assert!(view.contains("payload length:"));
     }
 }

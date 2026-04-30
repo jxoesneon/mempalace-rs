@@ -40,7 +40,7 @@ fn main() {
             loop {
                 let msg = websocket.read().unwrap();
                 if msg.is_binary() || msg.is_text() {
-                    println!("received message {}", msg);
+                    println!("Received a message");
                 }
             }
         });

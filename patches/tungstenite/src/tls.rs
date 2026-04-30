@@ -109,7 +109,7 @@ mod encryption {
                                 let total_number = native_certs.len();
                                 let (number_added, number_ignored) =
                                     root_store.add_parsable_certificates(native_certs);
-                                log::debug!("Added {number_added}/{total_number} native root certificates (ignored {number_ignored})");
+                                log::debug!("Added {number_added}/{total_number} native roots (ignored {number_ignored})");
                             }
                             #[cfg(feature = "rustls-tls-webpki-roots")]
                             {

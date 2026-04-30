@@ -1153,7 +1153,7 @@ mod tests {
             #[cfg(feature = "alloc")]
             {
                 // revocation reasons should be Debug.
-                println!("{actual:?}");
+                let _ = format!("{actual:?}");
             }
         }
 
@@ -1177,20 +1177,22 @@ mod tests {
         let crl =
             BorrowedCertRevocationList::from_der(include_bytes!("../../tests/crls/crl.valid.der"))
                 .unwrap();
-        println!("{crl:?}"); // BorrowedCertRevocationList should be debug.
+        let _ = format!("{crl:?}"); // BorrowedCertRevocationList should be debug.
+        println!("crl ({} revoked certs)", crl.into_iter().count());
 
         let owned_crl = crl.to_owned().unwrap();
-        println!("{owned_crl:?}"); // OwnedCertRevocationList should be debug.
+        let _ = format!("{owned_crl:?}"); // OwnedCertRevocationList should be debug.
+        println!("owned_crl ({} revoked certs)", owned_crl.revoked_certs.len());
         let _ = owned_crl.clone(); // OwnedCertRevocationList should be clone.
 
         let mut revoked_certs = crl.into_iter();
-        println!("{revoked_certs:?}"); // RevokedCert should be debug.
+        let _ = format!("{revoked_certs:?}"); // RevokedCert should be debug.
 
         let revoked_cert = revoked_certs.next().unwrap().unwrap();
-        println!("{revoked_cert:?}"); // BorrowedRevokedCert should be debug.
+        let _ = format!("{revoked_cert:?}"); // BorrowedRevokedCert should be debug.
 
         let owned_revoked_cert = revoked_cert.to_owned();
-        println!("{owned_revoked_cert:?}"); // OwnedRevokedCert should be debug.
+        let _ = format!("{owned_revoked_cert:?}"); // OwnedRevokedCert should be debug.
         let _ = owned_revoked_cert.clone(); // OwnedRevokedCert should be clone.
     }
 

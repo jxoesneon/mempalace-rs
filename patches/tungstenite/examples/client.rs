@@ -16,8 +16,8 @@ fn main() {
 
     socket.send(Message::Text("Hello WebSocket".into())).unwrap();
     loop {
-        let msg = socket.read().expect("Error reading message");
-        println!("Received: {}", msg);
+        let _msg = socket.read().expect("Error reading message");
+        println!("Received a message");
     }
     // socket.close(None);
 }

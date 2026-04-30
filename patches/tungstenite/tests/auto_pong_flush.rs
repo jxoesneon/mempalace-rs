@@ -51,10 +51,8 @@ impl Write for MockWrite {
         if self.flush_calls % NUMBER_OF_FLUSHES_TO_GET_IT_TO_WORK == 0 {
             mem::swap(&mut self.written_data, &mut self.flushed_data);
             self.written_data.clear();
-            eprintln!("flush success");
             Ok(())
         } else {
-            eprintln!("flush would block");
             Err(io::Error::new(io::ErrorKind::WouldBlock, "try again"))
         }
     }

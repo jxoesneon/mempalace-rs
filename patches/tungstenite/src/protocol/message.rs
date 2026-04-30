@@ -156,7 +156,7 @@ pub enum IncompleteMessageType {
 }
 
 /// An enum representing the various forms of a WebSocket message.
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Eq, PartialEq, Clone)]
 pub enum Message {
     /// A text WebSocket message
     Text(String),
@@ -174,6 +174,31 @@ pub enum Message {
     Close(Option<CloseFrame<'static>>),
     /// Raw frame. Note, that you're not going to get this value while reading the message.
     Frame(Frame),
+}
+
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Message::Text(ref s) => f
+                .debug_tuple("Text")
+                .field(&format_args!("<{} bytes>", s.len()))
+                .finish(),
+            Message::Binary(ref b) => f
+                .debug_tuple("Binary")
+                .field(&format_args!("<{} bytes>", b.len()))
+                .finish(),
+            Message::Ping(ref b) => f
+                .debug_tuple("Ping")
+                .field(&format_args!("<{} bytes>", b.len()))
+                .finish(),
+            Message::Pong(ref b) => f
+                .debug_tuple("Pong")
+                .field(&format_args!("<{} bytes>", b.len()))
+                .finish(),
+            Message::Close(ref c) => f.debug_tuple("Close").field(c).finish(),
+            Message::Frame(ref fr) => f.debug_tuple("Frame").field(fr).finish(),
+        }
+    }
 }
 
 impl Message {
@@ -315,10 +340,13 @@ impl TryFrom<Message> for String {
 
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> StdResult<(), fmt::Error> {
-        if let Ok(string) = self.to_text() {
-            write!(f, "{}", string)
-        } else {
-            write!(f, "Binary Data<length={}>", self.len())
+        match *self {
+            Message::Text(ref s) => write!(f, "Text Data<length={}>", s.len()),
+            Message::Binary(ref b) => write!(f, "Binary Data<length={}>", b.len()),
+            Message::Ping(ref b) => write!(f, "Ping Data<length={}>", b.len()),
+            Message::Pong(ref b) => write!(f, "Pong Data<length={}>", b.len()),
+            Message::Close(ref c) => write!(f, "Close Data<{:?}>", c.as_ref().map(|f| f.code)),
+            Message::Frame(ref fr) => write!(f, "Frame Data<length={}>", fr.len()),
         }
     }
 }
@@ -330,7 +358,7 @@ mod tests {
     #[test]
     fn display() {
         let t = Message::text("test".to_owned());
-        assert_eq!(t.to_string(), "test".to_owned());
+        assert_eq!(t.to_string(), "Text Data<length=4>".to_owned());
 
         let bin = Message::binary(vec![0, 1, 3, 4, 241]);
         assert_eq!(bin.to_string(), "Binary Data<length=5>".to_owned());
