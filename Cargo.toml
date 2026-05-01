@@ -1,6 +1,6 @@
 [package]
 name = "mempalace-rs"
-version = "0.4.3"
+version = "0.5.0"
 edition = "2021"
 description = "High-performance, local AI memory with AAAK v3.2 protocol and temporal Knowledge Graph"
 license = "MIT"

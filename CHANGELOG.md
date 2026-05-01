@@ -5,7 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.2] - 2026-04-12
+## [0.5.0] - 2026-05-01
+
+### Added
+
+- **Halls Semantic Routing**: Implemented keyword-based routing for autonomous memory categorization into specialized "Halls" (e.g., `emotions`, `consciousness`, `technical`, `identity`).
+- **Write-Ahead Log (WAL)**: Added asynchronous audit logging for all write operations (`add_drawer`, `delete_drawer`, `kg_add`, `kg_invalidate`) to ensure integrity and recoverability.
+- **Test Coverage Mandate (>= 90%)**: Achieved 90%+ project-wide line coverage through targeted test generation for orchestration modules (`mcp_server`, `storage`, `vector_storage`).
+- **Improved Platform Integration**: Added support for 15+ platform integration guides (Claude Code, Cursor, Windsurf).
+
+### Fixed
+
+- **Cleartext Logging Security**: Sanitized all sensitive logging (certificates, CRLs, frame payloads) across patched dependencies (`rustls-webpki`, `tungstenite`) to resolve 11 code scanning alerts.
+- **Storage Pruning Stability**: Fixed edge cases in `prune_memories` and strengthened error handling for invalid configurations and IO failures.
+
+### Changed
+
+- **Native Vector Optimization**: Solidified the native `usearch` + `fastembed` storage engine, achieving ~3.7M tokens/sec performance.
 
 ### Fixed
 
