@@ -718,3 +718,87 @@ impl Drop for VectorStorage {
         let _ = self.db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_initialization() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("db.sqlite");
+        let index_path = dir.path().join("index.usearch");
+        let vs = VectorStorage::new(&db_path, &index_path).unwrap();
+        assert_eq!(vs.memory_count().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_add_memory() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("db.sqlite");
+        let index_path = dir.path().join("index.usearch");
+        let mut vs = VectorStorage::new(&db_path, &index_path).unwrap();
+
+        let id = vs
+            .add_memory("test memory", "wing1", "room1", None, None)
+            .unwrap();
+        assert!(id > 0);
+        assert_eq!(vs.memory_count().unwrap(), 1);
+
+        let mem = vs.get_memory_by_id(id).unwrap();
+        assert_eq!(mem.text_content, "test memory");
+    }
+
+    #[test]
+    fn test_add_memories_batch_quota() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("db.sqlite");
+        let index_path = dir.path().join("index.usearch");
+        let mut vs = VectorStorage::new(&db_path, &index_path).unwrap();
+
+        let texts = vec!["mem1".to_string(), "mem2".to_string()];
+        let wings = vec!["w".to_string(), "w".to_string()];
+        let rooms = vec!["r".to_string(), "r".to_string()];
+        let sources = vec![None, None];
+        let times = vec![None, None];
+
+        let ids = vs
+            .add_memories_batch(texts, wings, rooms, sources, times)
+            .unwrap();
+        assert_eq!(ids.len(), 2);
+        assert_eq!(vs.memory_count().unwrap(), 2);
+    }
+
+    #[test]
+    fn test_delete_memory() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("db.sqlite");
+        let index_path = dir.path().join("index.usearch");
+        let mut vs = VectorStorage::new(&db_path, &index_path).unwrap();
+
+        let id = vs.add_memory("delete me", "w", "r", None, None).unwrap();
+        vs.delete_memory(id).unwrap();
+        assert!(vs.get_memory_by_id(id).is_err());
+    }
+
+    #[test]
+    fn test_search_failures() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("db.sqlite");
+        let index_path = dir.path().join("index.usearch");
+        let vs = VectorStorage::new(&db_path, &index_path).unwrap();
+
+        // Search should return empty vector for unknown room/query
+        let results = vs.search_room("query", "none", "none", 1, None).unwrap();
+        assert!(results.is_empty());
+
+        let results = vs.search("unknown", 1).unwrap();
+        assert!(results.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod extra_tests {
+    include!("vector_storage_extra_tests.rs");
+}

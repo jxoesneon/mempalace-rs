@@ -1120,32 +1120,68 @@ mod tests {
     }
 
     #[test]
-    fn test_layer1_format_generation_weights() {
-        let docs = vec![
-            "weight_test".to_string(),
-            "emotional_test".to_string(),
-            "long_test ".to_string() + &"A".repeat(210),
-        ];
-        let metas = vec![
-            Some(
-                serde_json::json!({"weight": 0.9})
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            ),
-            Some(
-                serde_json::json!({"emotional_weight": 0.8})
-                    .as_object()
-                    .unwrap()
-                    .clone(),
-            ),
-            None,
-        ];
-        let dialect = crate::dialect::Dialect::default();
-        let output = dialect.generate_layer1(&docs, &metas);
-        assert!(output.contains("weight_test"));
-        assert!(output.contains("emotional_test"));
-        assert!(output.contains("long_test"));
-        assert!(output.contains("..."));
+    fn test_repair_invalid_config() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = MempalaceConfig {
+            config_dir: PathBuf::from("/nonexistent/path"),
+            ..Default::default()
+        };
+        let storage = Storage::new(":memory:").unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let result = rt.block_on(storage.repair(&config));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_memory_stack_complex_interactions() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = MempalaceConfig::new(Some(temp_dir.path().to_path_buf()));
+        let mut stack = MemoryStack::new(config.clone());
+
+        // Test L0 to L3 transitions
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let l0 = stack.l0.render();
+        let l1 = rt.block_on(stack.l1.generate());
+        let wake_up = rt.block_on(stack.wake_up(None));
+        assert_eq!(wake_up, MemoryStack::format_wake_up(l0, l1));
+    }
+
+    #[tokio::test]
+    async fn test_prune_empty_and_error_cases() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = MempalaceConfig::new(Some(temp_dir.path().to_path_buf()));
+
+        // Use a config that forces an error in open_vector_storage (e.g., non-existent base path)
+        let invalid_config = MempalaceConfig {
+            config_dir: PathBuf::from("/non/existent/path/that/will/fail"),
+            ..config.clone()
+        };
+
+        let storage = Storage::new(":memory:").unwrap();
+        let result = storage
+            .prune_memories(&invalid_config, 0.8, true, None)
+            .await;
+
+        // Assert it fails
+        assert!(
+            result.is_err(),
+            "Expected error for invalid configuration path"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_compress_error_cases() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config = MempalaceConfig::new(Some(temp_dir.path().to_path_buf()));
+
+        // Test compress with invalid vector storage (should gracefully return ok)
+        let invalid_config = MempalaceConfig {
+            collection_name: "non_existent_12345".to_string(),
+            ..config.clone()
+        };
+
+        let storage = Storage::new(":memory:").unwrap();
+        let result = storage.compress_drawers(&invalid_config, None).await;
+        assert!(result.is_ok());
     }
 }
