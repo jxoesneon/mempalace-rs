@@ -51,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Full Parity with Python Implementation**:
   - Implemented `repair` command for HNSW index recovery from SQLite metadata.
-  - Implemented `instructions` command for AI agent system-prompt onboarding.
+  - Implemented `instructions` command for agent system-prompt onboarding.
   - Added interactive entity confirmation in `mempalace init` using `dialoguer`.
   - Ported emotional-marker and speech-pattern regex parsing to `src/extractor.rs`.
 - **Sync with Latest Upstream (April 2026)**:

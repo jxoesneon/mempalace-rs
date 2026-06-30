@@ -35,7 +35,7 @@ cargo run -- search "async patterns"
 
 ### 4. Get Wakeup Context
 
-Retrieve the "Layer 0 + Layer 1" context designed for AI agent system prompts (~600-900 tokens).
+Retrieve the "Layer 0 + Layer 1" context designed for agent system prompts (~600-900 tokens).
 
 ```bash
 # Default wakeup
@@ -59,7 +59,7 @@ cargo run -- compress --wing MyProject
 
 ### 6. MCP Server Integration
 
-Run the Model Context Protocol server to connect your palace directly to Claude Code or other AI agents.
+Run the Model Context Protocol server to connect your palace directly to MCP clients.
 
 ```bash
 cargo run -- mcp-server
@@ -115,9 +115,9 @@ fn main() {
 
 ## Integration Examples
 
-### Claude Code Integration
+### MCP Client Integration
 
-Add the following to your `.claude/settings.json` (or equivalent MCP config):
+Add the following to your MCP client configuration (e.g. `.claude/settings.json`):
 
 ```json
 {

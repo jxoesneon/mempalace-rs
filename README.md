@@ -10,14 +10,14 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-2021-orange.svg)](https://doc.rust-lang.org/cargo/reference/manifest.html#the-edition-field)
 
-A high-performance, local, offline-first AI memory system built in Rust. Gives AI agents long-term retention by mining local codebases and conversations into a structured, searchable, and symbolic "palace."
+A high-performance, local, offline-first memory system built in Rust. Gives agents long-term retention by mining local codebases and conversations into a structured, searchable, and symbolic "palace."
 
 ## Features
 
 - **4-Layer Memory Stack (L0-L3)**: Hierarchical context from identity to deep semantic search
 - **AAAK V:3.2 Compression**: ~30x token reduction with adaptive density, importance scoring, and delta encoding
 - **Temporal Knowledge Graph**: Entity relationships with valid_from/valid_to tracking
-- **20 MCP Tools**: Full Model Context Protocol integration for AI agent interaction
+- **20 MCP Tools**: Full Model Context Protocol integration for agent interaction
 - **SQLite + VectorStorage**: Native embedding storage for structured and vector data
 - **197 Tests**: All passing, production-ready
 
@@ -45,7 +45,7 @@ cargo install mempalace-rs
 
 Connect your palace to your favorite agent in seconds. For all 15+ supported platforms, see [SKILLS_GUIDE.md](SKILLS_GUIDE.md).
 
-### 1. Claude Code
+### 1. Claude Code / Generic MCP Client
 
 Open your terminal in the project root and run:
 
@@ -185,7 +185,7 @@ WING|ROOM|DATE|SOURCE
 | `mine <dir>`     | Ingest projects or conversations (supports `--limit`, `--dry-run`, `--no-gitignore`) |
 | `search <query>` | Semantic search over ingested data (supports `--wing`, `--room`, `--results`)        |
 | `repair`         | Recover/re-index vector storage from SQLite metadata                                 |
-| `instructions`   | Output system prompts for AI agent onboarding                                        |
+| `instructions`   | Output system prompts for agent onboarding                                        |
 | `wakeup`         | Get L0+L1 context (~600-900 tokens)                                                  |
 | `compress`       | AAAK compress drawers                                                                |
 | `split <dir>`    | Split mega-files into per-session files                                              |
@@ -332,6 +332,6 @@ This project is a 100% functional port of the original Python `mempalace` implem
 
 This is a Rust port of the original [MemPalace](https://github.com/milla-jovovich/mempalace) Python project by Milla Jovovich & Ben Sigman.
 
-## Agent Integration
+## Client Integration
 
-Load `mempalace-rs.skill` for comprehensive documentation of all 20 MCP tools, architecture details, and best practices for AI agents interacting with the palace.
+Load `mempalace-rs.skill` for comprehensive documentation of all 20 MCP tools, architecture details, and best practices for clients interacting with the palace.

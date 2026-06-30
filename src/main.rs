@@ -117,7 +117,7 @@ pub enum BenchCommands {
         #[arg(short, long, default_value_t = 1000000)]
         tokens: usize,
     },
-    #[command(about = "Run BEAM agentic memory benchmark")]
+    #[command(about = "Run BEAM memory benchmark")]
     Beam,
 }
 

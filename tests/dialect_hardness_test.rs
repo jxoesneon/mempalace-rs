@@ -45,7 +45,7 @@ fn test_write_discipline_decision_v1() {
 #[test]
 fn test_faithfulness_score_inclusion() {
     let dialect = Dialect::new(None, None);
-    let text = "Mempalace is an offline-first memory system for AI agents.";
+    let text = "Mempalace is an offline-first memory system for agents.";
     // Use low density to ensure we get a summary
     let compressed = dialect.compress_with_density(text, None, 5);
 

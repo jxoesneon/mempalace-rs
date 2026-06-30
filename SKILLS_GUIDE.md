@@ -1,6 +1,6 @@
-# MemPalace-rs AI Agent Integration Guide
+# MemPalace-rs Client Integration Guide
 
-Welcome to the definitive guide for connecting your AI agents to the MemPalace-rs memory stack. This guide covers the top 15 platforms, IDEs, and frameworks in the agentic ecosystem.
+Welcome to the definitive guide for connecting clients to the MemPalace-rs memory stack. This guide covers the top 15 platforms, IDEs, and frameworks.
 
 ## 🚀 The Big 3 (Insta-Setup)
 
@@ -66,7 +66,7 @@ Edit `~/.config/zed/settings.json`:
 }
 ```
 
-### 5. VS Code (via MCP Extension)
+### 5. VS Code (MCP Extension)
 
 **Type**: MCP
 
@@ -141,12 +141,12 @@ Define a MemPalace tool wrapper using the MCP stdio interface and assign it to y
 ### 12. OpenAI Agents SDK
 
 **Type**: Native SDK Integration
-OpenAI agents can consume MCP tools directly. Configure the MCP toolbox in your agent definition to point to the `mempalace-rs` stdio endpoint.
+OpenAI clients can consume MCP tools directly. Configure the MCP toolbox in your client definition to point to the `mempalace-rs` stdio endpoint.
 
 ### 13. Google ADK (Agent Development Kit)
 
 **Type**: Toolbox
-Add MemPalace to your Google Cloud / Vertex AI agent by registering the `mempalace-rs` binary as a local tool in the ADK toolbox config.
+Add MemPalace to your Google Cloud / Vertex AI client by registering the `mempalace-rs` binary as a local tool in the ADK toolbox config.
 
 ---
 
