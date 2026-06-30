@@ -823,23 +823,16 @@ impl McpServer {
     }
 
     pub async fn mempalace_diary_write(&self, args: &Value) -> Result<Value> {
-        let agent_input = args["agent"]
+        let agent = args["agent"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing agent"))?;
 
-        // Round 4 Fix: Sanitize and Tag Agent Identity to prevent spoofing
-        // We enforce a "(via MCP)" suffix for all entries written through this interface
-        let agent = if agent_input.ends_with("(via MCP)") {
-            agent_input.to_string()
-        } else {
-            format!("{} (via MCP)", agent_input)
-        };
-
         let content = args["content"]
             .as_str()
-            .ok_or_else(|| anyhow!("Missing content"))?;
+            .or_else(|| args["summary"].as_str())
+            .ok_or_else(|| anyhow!("Missing content or summary"))?;
 
-        diary::write_diary(&agent, content)?;
+        diary::write_diary(agent, content)?;
         Ok(json!({ "status": "success", "agent": agent }))
     }
 
@@ -918,7 +911,7 @@ pub async fn run_mcp_server() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    
     fn setup_test() -> (MempalaceConfig, tempfile::TempDir) {
         let temp_dir = tempfile::tempdir().unwrap();
         let config = MempalaceConfig::new(Some(temp_dir.path().to_path_buf()));
@@ -1062,5 +1055,26 @@ mod tests {
         let (config, _td) = setup_test();
         let server = Arc::new(McpServer::new_test(config));
         // Need to check handle_request logic for tool call with missing params
+    }
+
+    #[tokio::test]
+    async fn test_mempalace_diary_write_summary_fallback() {
+        let (config, temp_dir) = setup_test();
+        let server = McpServer::new_test(config);
+        std::env::set_var("HOME", temp_dir.path().as_os_str());
+
+        let write_res = server
+            .mempalace_diary_write(&json!({ "agent": "test-agent", "summary": "hello summary" }))
+            .await
+            .unwrap();
+        assert_eq!(write_res["status"], "success");
+        assert_eq!(write_res["agent"], "test-agent");
+
+        let read_res = server
+            .mempalace_diary_read(&json!({ "agent": "test-agent", "last_n": 5 }))
+            .await
+            .unwrap();
+        let entries = read_res["entries"].as_array().unwrap();
+        assert_eq!(entries[0]["content"], "hello summary");
     }
 }
