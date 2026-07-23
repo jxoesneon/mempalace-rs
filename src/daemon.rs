@@ -1,4 +1,4 @@
-﻿//! Daemon / background worker for Mempalace.
+//! Daemon / background worker for Mempalace.
 //!
 //! A minimal, in-process background worker that persists a PID file under the
 //! Mempalace config directory and runs a periodic maintenance loop. This is a
@@ -162,7 +162,11 @@ impl Daemon {
         let handle = tokio::spawn(run_loop(shutdown, interval, maintenance, heartbeat));
         self.handle = Some(handle);
 
-        tracing::info!("daemon started (pid {}) for {}", pid, self.palace_path.display());
+        tracing::info!(
+            "daemon started (pid {}) for {}",
+            pid,
+            self.palace_path.display()
+        );
         Ok(())
     }
 

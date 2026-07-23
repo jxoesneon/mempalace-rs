@@ -1,4 +1,4 @@
-﻿//! Hook management for the MemPalace CLI.
+//! Hook management for the MemPalace CLI.
 //!
 //! This module is a Rust port of the hook-management surface from the upstream
 //! Python `mempalace.hooks_cli`. It provides a small CLI-facing API to list,
@@ -445,7 +445,10 @@ mod tests {
 
         let content = std::fs::read_to_string(&path).unwrap();
         let config: Value = serde_json::from_str(&content).unwrap();
-        assert_eq!(config.get("palace_path").unwrap().as_str().unwrap(), "/tmp/palace");
+        assert_eq!(
+            config.get("palace_path").unwrap().as_str().unwrap(),
+            "/tmp/palace"
+        );
         let hooks = config.get("hooks").unwrap().as_object().unwrap();
         assert_eq!(hooks.get("auto_save").unwrap().as_bool().unwrap(), true);
         assert_eq!(hooks.get("silent_save").unwrap().as_bool().unwrap(), false);
@@ -520,7 +523,8 @@ mod tests {
         cli.install_hook(hook2.clone()).unwrap();
 
         let registry: HooksRegistry =
-            serde_json::from_str(&std::fs::read_to_string(dir.join(HOOKS_REGISTRY_FILE)).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join(HOOKS_REGISTRY_FILE)).unwrap())
+                .unwrap();
         assert_eq!(registry.hooks.len(), 1);
         assert_eq!(registry.hooks[0], hook2);
     }
@@ -528,9 +532,27 @@ mod tests {
     #[test]
     fn test_install_multiple_hooks() {
         let (cli, _dir) = make_cli();
-        cli.install_hook(HookEntry::new("stop", "Stop", "claude-code", "bash stop.sh")).unwrap();
-        cli.install_hook(HookEntry::new("precompact", "PreCompact", "claude-code", "bash precompact.sh")).unwrap();
-        cli.install_hook(HookEntry::new("codex-stop", "Stop", "codex", "bash codex_stop.sh")).unwrap();
+        cli.install_hook(HookEntry::new(
+            "stop",
+            "Stop",
+            "claude-code",
+            "bash stop.sh",
+        ))
+        .unwrap();
+        cli.install_hook(HookEntry::new(
+            "precompact",
+            "PreCompact",
+            "claude-code",
+            "bash precompact.sh",
+        ))
+        .unwrap();
+        cli.install_hook(HookEntry::new(
+            "codex-stop",
+            "Stop",
+            "codex",
+            "bash codex_stop.sh",
+        ))
+        .unwrap();
 
         let hooks = cli.list_hooks().unwrap();
         assert_eq!(hooks.len(), 3);
@@ -543,8 +565,20 @@ mod tests {
     #[test]
     fn test_uninstall_hook() {
         let (cli, _dir) = make_cli();
-        cli.install_hook(HookEntry::new("stop", "Stop", "claude-code", "bash stop.sh")).unwrap();
-        cli.install_hook(HookEntry::new("precompact", "PreCompact", "claude-code", "bash precompact.sh")).unwrap();
+        cli.install_hook(HookEntry::new(
+            "stop",
+            "Stop",
+            "claude-code",
+            "bash stop.sh",
+        ))
+        .unwrap();
+        cli.install_hook(HookEntry::new(
+            "precompact",
+            "PreCompact",
+            "claude-code",
+            "bash precompact.sh",
+        ))
+        .unwrap();
 
         assert!(cli.uninstall_hook("stop").unwrap());
         let hooks = cli.list_hooks().unwrap();
@@ -555,7 +589,13 @@ mod tests {
     #[test]
     fn test_uninstall_hook_not_found() {
         let (cli, _dir) = make_cli();
-        cli.install_hook(HookEntry::new("stop", "Stop", "claude-code", "bash stop.sh")).unwrap();
+        cli.install_hook(HookEntry::new(
+            "stop",
+            "Stop",
+            "claude-code",
+            "bash stop.sh",
+        ))
+        .unwrap();
         assert!(!cli.uninstall_hook("missing").unwrap());
         assert_eq!(cli.list_hooks().unwrap().len(), 1);
     }
@@ -576,7 +616,13 @@ mod tests {
     #[test]
     fn test_disable_hook() {
         let (cli, _dir) = make_cli();
-        cli.install_hook(HookEntry::new("stop", "Stop", "claude-code", "bash stop.sh")).unwrap();
+        cli.install_hook(HookEntry::new(
+            "stop",
+            "Stop",
+            "claude-code",
+            "bash stop.sh",
+        ))
+        .unwrap();
 
         assert!(cli.disable_hook("stop").unwrap());
         let hooks = cli.list_hooks().unwrap();
@@ -598,7 +644,13 @@ mod tests {
     #[test]
     fn test_enable_hook_already_enabled() {
         let (cli, _dir) = make_cli();
-        cli.install_hook(HookEntry::new("stop", "Stop", "claude-code", "bash stop.sh")).unwrap();
+        cli.install_hook(HookEntry::new(
+            "stop",
+            "Stop",
+            "claude-code",
+            "bash stop.sh",
+        ))
+        .unwrap();
         assert!(cli.enable_hook("stop").unwrap());
         let hooks = cli.list_hooks().unwrap();
         assert!(hooks[0].enabled);
@@ -632,7 +684,13 @@ mod tests {
     #[test]
     fn test_uninstall_hook_removes_registry_file() {
         let (cli, dir) = make_cli();
-        cli.install_hook(HookEntry::new("stop", "Stop", "claude-code", "bash stop.sh")).unwrap();
+        cli.install_hook(HookEntry::new(
+            "stop",
+            "Stop",
+            "claude-code",
+            "bash stop.sh",
+        ))
+        .unwrap();
         cli.uninstall_hook("stop").unwrap();
         let hooks = cli.list_hooks().unwrap();
         assert!(hooks.is_empty());
@@ -704,7 +762,8 @@ mod tests {
     fn test_run_hook() {
         let dir = tempfile::tempdir().unwrap();
         let cli = HooksCli::new(dir.path().to_path_buf());
-        cli.install_hook(HookEntry::new("echo", "Save", "generic", "echo test")).unwrap();
+        cli.install_hook(HookEntry::new("echo", "Save", "generic", "echo test"))
+            .unwrap();
         let output = cli.run_hook("echo").unwrap();
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("test"));

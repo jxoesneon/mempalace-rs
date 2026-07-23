@@ -325,10 +325,7 @@ fn is_pid_alive(pid: u32) -> bool {
 }
 
 /// Minimal HTTP health server used by [`Service::start_http`].
-async fn run_http_server(
-    listener: TcpListener,
-    mut shutdown: watch::Receiver<bool>,
-) -> Result<()> {
+async fn run_http_server(listener: TcpListener, mut shutdown: watch::Receiver<bool>) -> Result<()> {
     loop {
         tokio::select! {
             biased;

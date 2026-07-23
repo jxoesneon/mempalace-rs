@@ -1,4 +1,4 @@
-﻿//! Embedding utilities for the memory palace.
+//! Embedding utilities for the memory palace.
 //!
 //! Provides a thin wrapper around the embedder factory plus vector math helpers
 //! (cosine similarity, top-k search, normalization). Production code uses the
@@ -31,7 +31,9 @@ impl Embedder for FastEmbedder {
     fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         let embedder = crate::embedder_factory::EmbedderFactory::get_embedder()
             .context("failed to get embedder")?;
-        embedder.embed(texts.to_vec(), None).context("batch embedding failed")
+        embedder
+            .embed(texts.to_vec(), None)
+            .context("batch embedding failed")
     }
 }
 
@@ -197,7 +199,12 @@ pub fn top_k_similar(query: &[f32], vectors: &[Vec<f32>], k: usize) -> Vec<(usiz
     let mut scored: Vec<(usize, f32)> = vectors
         .iter()
         .enumerate()
-        .map(|(idx, vec)| (idx, cosine_similarity_with_query_norm(query, query_norm, vec)))
+        .map(|(idx, vec)| {
+            (
+                idx,
+                cosine_similarity_with_query_norm(query, query_norm, vec),
+            )
+        })
         .collect();
     scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     scored.truncate(k);
@@ -207,7 +214,11 @@ pub fn top_k_similar(query: &[f32], vectors: &[Vec<f32>], k: usize) -> Vec<(usiz
 /// Find the top-k indices most similar to a pre-normalized query from a slice of
 /// pre-normalized vectors. This skips all norm calculations and uses a fast dot
 /// product.
-pub fn top_k_similar_normalized(query: &[f32], vectors: &[Vec<f32>], k: usize) -> Vec<(usize, f32)> {
+pub fn top_k_similar_normalized(
+    query: &[f32],
+    vectors: &[Vec<f32>],
+    k: usize,
+) -> Vec<(usize, f32)> {
     let k = k.min(vectors.len());
     if k == 0 || query.is_empty() {
         return Vec::new();
@@ -332,10 +343,10 @@ mod tests {
     fn test_top_k_similar() {
         let query = vec![1.0f32, 0.0];
         let vectors = vec![
-            vec![1.0, 0.0], // 1.0
-            vec![0.0, 1.0], // 0.0
+            vec![1.0, 0.0],     // 1.0
+            vec![0.0, 1.0],     // 0.0
             vec![0.707, 0.707], // ~0.707
-            vec![-1.0, 0.0], // -1.0
+            vec![-1.0, 0.0],    // -1.0
         ];
         let top = top_k_similar(&query, &vectors, 2);
         assert_eq!(top.len(), 2);
@@ -392,7 +403,10 @@ mod tests {
 
         let naive_cos = naive_dot / (naive_norm_a * vector_norm(&b));
         let opt_cos = cosine_similarity(&a, &b);
-        assert!((naive_cos - opt_cos).abs() < 1e-5, "cosine_similarity mismatch");
+        assert!(
+            (naive_cos - opt_cos).abs() < 1e-5,
+            "cosine_similarity mismatch"
+        );
 
         let naive_euclidean = a
             .iter()
@@ -421,11 +435,7 @@ mod tests {
     #[test]
     fn test_top_k_similar_normalized() {
         let query = vec![1.0f32, 0.0];
-        let vectors = vec![
-            vec![1.0, 0.0],
-            vec![0.0, 1.0],
-            vec![0.707, 0.707],
-        ];
+        let vectors = vec![vec![1.0, 0.0], vec![0.0, 1.0], vec![0.707, 0.707]];
         let top = top_k_similar_normalized(&query, &vectors, 2);
         assert_eq!(top.len(), 2);
         assert_eq!(top[0].0, 0);

@@ -911,7 +911,7 @@ pub async fn run_mcp_server() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     fn setup_test() -> (MempalaceConfig, tempfile::TempDir) {
         let temp_dir = tempfile::tempdir().unwrap();
         let config = MempalaceConfig::new(Some(temp_dir.path().to_path_buf()));

@@ -1,4 +1,4 @@
-﻿//! Hallways — within-wing entity-to-entity connectors.
+//! Hallways — within-wing entity-to-entity connectors.
 //!
 //! A **hallway** is a connection between two entities (people, projects,
 //! concepts, interests) inside one wing, materialized from their
@@ -17,9 +17,9 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
-use std::path::PathBuf;
 #[cfg(test)]
 use std::fs;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, warn};
 
@@ -115,7 +115,13 @@ fn hallway_id(wing: &str, entity_a: &str, entity_b: &str) -> String {
     let key = format!("{}::{}::{}", wing, pair[0], pair[1]);
     let hash = Sha256::digest(key.as_bytes());
     let suffix = hex::encode(&hash[..4]);
-    format!("hallway_{}_{}_{}_{}", sanitize_id(wing), sanitize_id(pair[0]), sanitize_id(pair[1]), suffix)
+    format!(
+        "hallway_{}_{}_{}_{}",
+        sanitize_id(wing),
+        sanitize_id(pair[0]),
+        sanitize_id(pair[1]),
+        suffix
+    )
 }
 
 fn sanitize_id(s: &str) -> String {
@@ -242,8 +248,10 @@ pub fn compute_hallways_for_wing(
     }
 
     let existing = load_hallways(config);
-    let mut existing_dynamics: std::collections::HashMap<EntityPair, serde_json::Map<String, serde_json::Value>> =
-        std::collections::HashMap::new();
+    let mut existing_dynamics: std::collections::HashMap<
+        EntityPair,
+        serde_json::Map<String, serde_json::Value>,
+    > = std::collections::HashMap::new();
     for h in &existing {
         if h.wing != wing {
             continue;
@@ -275,7 +283,10 @@ pub fn compute_hallways_for_wing(
         let (entity_a_arc, entity_b_arc) = key.clone();
         let entity_a = entity_a_arc.to_string();
         let entity_b = entity_b_arc.to_string();
-        let rooms: Vec<String> = pair_rooms.get(&key).map(|s| s.iter().map(|r| r.to_string()).collect()).unwrap_or_default();
+        let rooms: Vec<String> = pair_rooms
+            .get(&key)
+            .map(|s| s.iter().map(|r| r.to_string()).collect())
+            .unwrap_or_default();
         let room_summary = if rooms.is_empty() {
             "(no room tags)".to_string()
         } else {
@@ -292,7 +303,11 @@ pub fn compute_hallways_for_wing(
             entity_a,
             entity_b,
             count,
-            if rooms.is_empty() { "no".to_string() } else { rooms.len().to_string() },
+            if rooms.is_empty() {
+                "no".to_string()
+            } else {
+                rooms.len().to_string()
+            },
             room_word,
             room_summary
         );
@@ -326,7 +341,11 @@ pub fn compute_hallways_for_wing(
             }
         }
         let now = chrono::Utc::now().timestamp();
-        if record.strength.is_none() || record.stability.is_none() || record.last_activated.is_none() || record.access_count.is_none() {
+        if record.strength.is_none()
+            || record.stability.is_none()
+            || record.last_activated.is_none()
+            || record.access_count.is_none()
+        {
             let mut dyn_state = crate::dynamics::MemoryDynamics::new();
             dyn_state.initialize(now);
             record.strength = Some(record.strength.unwrap_or(dyn_state.strength));
@@ -337,10 +356,8 @@ pub fn compute_hallways_for_wing(
         created.push(record);
     }
 
-    let preserved_other_wings: Vec<Hallway> = existing
-        .into_iter()
-        .filter(|h| h.wing != wing)
-        .collect();
+    let preserved_other_wings: Vec<Hallway> =
+        existing.into_iter().filter(|h| h.wing != wing).collect();
     save_hallways(config, &[preserved_other_wings, created.clone()].concat())?;
 
     Ok(created)
@@ -384,7 +401,13 @@ mod tests {
         (dir, config)
     }
 
-    fn add_test_memory(vs: &mut VectorStorage, dir: &std::path::Path, wing: &str, room: &str, content: &str) {
+    fn add_test_memory(
+        vs: &mut VectorStorage,
+        dir: &std::path::Path,
+        wing: &str,
+        room: &str,
+        content: &str,
+    ) {
         vs.add_memory(content, wing, room, None, None).unwrap();
         vs.save_index(dir.join("vectors.usearch")).unwrap();
     }

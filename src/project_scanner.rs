@@ -2273,7 +2273,11 @@ implementation("com.google.guava:guava:31.0")
             run(repo, &["init", "--quiet"]);
             run(repo, &["config", "user.name", "Alice Smith"]);
             run(repo, &["config", "user.email", "alice@example.com"]);
-            write_file(&dir, &format!("{}/main.txt", repo.file_name().unwrap().to_string_lossy()), "x");
+            write_file(
+                &dir,
+                &format!("{}/main.txt", repo.file_name().unwrap().to_string_lossy()),
+                "x",
+            );
             run(repo, &["add", "."]);
             run(repo, &["commit", "-m", "init", "--quiet"]);
         }
@@ -2305,8 +2309,16 @@ implementation("com.google.guava:guava:31.0")
         run(&repo, &["init", "--quiet"]);
         run(&repo, &["config", "user.name", "Alice Smith"]);
         run(&repo, &["config", "user.email", "alice@example.com"]);
-        write_file(&dir, "multi/pom.xml", "<project><name>parent</name></project>");
-        write_file(&dir, "multi/core/pom.xml", "<project><name>core</name></project>");
+        write_file(
+            &dir,
+            "multi/pom.xml",
+            "<project><name>parent</name></project>",
+        );
+        write_file(
+            &dir,
+            "multi/core/pom.xml",
+            "<project><name>core</name></project>",
+        );
         run(&repo, &["add", "."]);
         run(&repo, &["commit", "-m", "initial", "--quiet"]);
 

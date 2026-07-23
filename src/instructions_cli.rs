@@ -1,4 +1,4 @@
-﻿//! Instructions CLI — manage per-agent and system instructions for the memory palace.
+//! Instructions CLI — manage per-agent and system instructions for the memory palace.
 //!
 //! This is a minimal Rust forward-port of the instruction/template management
 //! surface found in upstream Python tooling. It stores text templates under the
@@ -80,7 +80,13 @@ impl InstructionsCli {
     /// Sanitize a name so it is safe for a filename.
     pub fn sanitize_name(name: &str) -> String {
         name.chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
             .collect::<String>()
             .trim_start_matches(|c: char| !c.is_alphanumeric())
             .to_string()
@@ -106,8 +112,7 @@ impl InstructionsCli {
         let content = fs::read_to_string(self.path(&name))
             .with_context(|| format!("reading instruction {name}"))?;
         let mut instruction: Instruction = if meta_path.exists() {
-            load_json_file(&meta_path)
-                .with_context(|| format!("parsing meta for {name}"))?
+            load_json_file(&meta_path).with_context(|| format!("parsing meta for {name}"))?
         } else {
             Instruction::new(name.clone(), content.clone())
         };
@@ -234,7 +239,8 @@ mod tests {
     #[test]
     fn test_render_existing() {
         let cli = test_cli();
-        cli.save(&Instruction::new("sys", "You are helpful.")).unwrap();
+        cli.save(&Instruction::new("sys", "You are helpful."))
+            .unwrap();
         assert_eq!(cli.render("sys").unwrap().unwrap(), "You are helpful.");
     }
 

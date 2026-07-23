@@ -317,8 +317,6 @@ mod tests {
             valid_to: None,
             score: 0.0,
             importance: 0.0,
-            last_accessed: 0,
-            access_count: 0,
         };
 
         assert_eq!(key_for(&r, SyncMode::ContentHash), content_hash("hello"));
@@ -352,8 +350,6 @@ mod tests {
             valid_to: None,
             score: 0.0,
             importance: 0.0,
-            last_accessed: 0,
-            access_count: 0,
         };
 
         let id1 = merge_memory(&mut dest, &record, SyncMode::Combined).unwrap();

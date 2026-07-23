@@ -1,4 +1,4 @@
-﻿//! Closet LLM — per-palace local LLM configuration and persona templates.
+//! Closet LLM — per-palace local LLM configuration and persona templates.
 //!
 //! A "closet" is a small, private store of LLM settings and system prompts that
 //! travel with the palace. This module lets users pick a default local model,
@@ -93,8 +93,7 @@ impl ClosetLlm {
 
     /// Save the closet config.
     pub fn save_config(&self, config: &ClosetLlmConfig) -> Result<()> {
-        save_json_file(&self.config_path(), config)
-            .with_context(|| "saving closet config")
+        save_json_file(&self.config_path(), config).with_context(|| "saving closet config")
     }
 
     fn load_personas_map(&self) -> Result<HashMap<String, Persona>> {
@@ -106,8 +105,7 @@ impl ClosetLlm {
     }
 
     fn save_personas_map(&self, personas: &HashMap<String, Persona>) -> Result<()> {
-        save_json_file(&self.personas_path(), personas)
-            .with_context(|| "saving personas")
+        save_json_file(&self.personas_path(), personas).with_context(|| "saving personas")
     }
 
     /// List all saved personas.

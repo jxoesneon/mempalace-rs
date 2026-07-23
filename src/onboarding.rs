@@ -122,8 +122,7 @@ pub fn bootstrap_files(
     }
 
     critical_facts.push_str("\n## Ground Truths\n");
-    critical_facts
-        .push_str("- The user is setting up MemPalace to provide context for agents.\n");
+    critical_facts.push_str("- The user is setting up MemPalace to provide context for agents.\n");
 
     let facts_path = mempalace_dir.join("critical_facts.md");
     fs::write(facts_path, critical_facts)?;

@@ -140,10 +140,22 @@ fn build_en() -> TranslationSet {
         \n\
         Set MEMPALACE_LANG to override the locale (e.g. en, es, fr).",
     );
-    map.insert("help.init", "Instructions for init: Detect rooms from a directory and propose a palace structure.");
-    map.insert("help.search", "Instructions for search: Find memories by exact or semantic query.");
-    map.insert("help.mine", "Instructions for mine: Import files into the palace.");
-    map.insert("help.status", "Instructions for status: Show what has been filed.");
+    map.insert(
+        "help.init",
+        "Instructions for init: Detect rooms from a directory and propose a palace structure.",
+    );
+    map.insert(
+        "help.search",
+        "Instructions for search: Find memories by exact or semantic query.",
+    );
+    map.insert(
+        "help.mine",
+        "Instructions for mine: Import files into the palace.",
+    );
+    map.insert(
+        "help.status",
+        "Instructions for status: Show what has been filed.",
+    );
     map.insert("terms.palace", "palace");
     map.insert("terms.wing", "wing");
     map.insert("terms.hall", "hall");

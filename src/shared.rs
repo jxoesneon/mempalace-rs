@@ -120,8 +120,8 @@ pub fn save_json_file<T: Serialize + ?Sized>(path: &Path, value: &T) -> Result<(
     fs::create_dir_all(dir)
         .with_context(|| format!("failed to create directory: {}", dir.display()))?;
 
-    let content = serde_json::to_string_pretty(value)
-        .with_context(|| "failed to serialize JSON value")?;
+    let content =
+        serde_json::to_string_pretty(value).with_context(|| "failed to serialize JSON value")?;
 
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
