@@ -22,3 +22,9 @@ examples/measure_improvements.rs
 HANDOFF.md
 
 og/
+
+# Coverage artifacts
+*.profraw
+
+# Upstream Python reference (local clone, not part of Rust codebase)
+upstream/
