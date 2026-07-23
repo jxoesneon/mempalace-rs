@@ -469,6 +469,80 @@ impl VectorStorage {
         Ok(records)
     }
 
+    /// Iterate over memories in fixed-size chunks.
+    ///
+    /// Returns a `Vec` of `Result<Vec<MemoryRecord>>` — each element is one
+    /// chunk of at most `chunk_size` records.  The caller iterates the outer
+    /// vec and processes each inner vec in turn.
+    pub fn get_memories_chunked(
+        &self,
+        wing: Option<&str>,
+        room: Option<&str>,
+        chunk_size: usize,
+    ) -> Vec<Result<Vec<MemoryRecord>>> {
+        let chunk_size = chunk_size.max(1) as i64;
+        let mut chunks = Vec::new();
+        let mut offset = 0i64;
+        loop {
+            let (sql, params_dyn): (String, Vec<Box<dyn rusqlite::ToSql>>) = match (wing, room) {
+                (Some(w), Some(r)) => (
+                    "SELECT id, text_content, wing, room, source_file, valid_from, valid_to, last_accessed, access_count, importance_score FROM memories WHERE wing = ?1 AND room = ?2 ORDER BY id ASC LIMIT ?3 OFFSET ?4".to_string(),
+                    vec![Box::new(w.to_string()) as Box<dyn rusqlite::ToSql>, Box::new(r.to_string()), Box::new(chunk_size), Box::new(offset)],
+                ),
+                (Some(w), None) => (
+                    "SELECT id, text_content, wing, room, source_file, valid_from, valid_to, last_accessed, access_count, importance_score FROM memories WHERE wing = ?1 ORDER BY id ASC LIMIT ?2 OFFSET ?3".to_string(),
+                    vec![Box::new(w.to_string()) as Box<dyn rusqlite::ToSql>, Box::new(chunk_size), Box::new(offset)],
+                ),
+                (None, Some(r)) => (
+                    "SELECT id, text_content, wing, room, source_file, valid_from, valid_to, last_accessed, access_count, importance_score FROM memories WHERE room = ?1 ORDER BY id ASC LIMIT ?2 OFFSET ?3".to_string(),
+                    vec![Box::new(r.to_string()) as Box<dyn rusqlite::ToSql>, Box::new(chunk_size), Box::new(offset)],
+                ),
+                (None, None) => (
+                    "SELECT id, text_content, wing, room, source_file, valid_from, valid_to, last_accessed, access_count, importance_score FROM memories ORDER BY id ASC LIMIT ?1 OFFSET ?2".to_string(),
+                    vec![Box::new(chunk_size) as Box<dyn rusqlite::ToSql>, Box::new(offset)],
+                ),
+            };
+            let result = (|| -> Result<Vec<MemoryRecord>> {
+                let mut stmt = self.db.prepare(&sql)?;
+                let params_ref: Vec<&dyn rusqlite::ToSql> =
+                    params_dyn.iter().map(|p| p.as_ref()).collect();
+                let records = stmt
+                    .query_map(params_ref.as_slice(), |row| {
+                        let last_accessed: i64 = row.get(7)?;
+                        let access_count: i64 = row.get(8)?;
+                        let base_score: f32 = row.get(9)?;
+                        Ok(MemoryRecord {
+                            id: row.get(0)?,
+                            text_content: row.get(1)?,
+                            wing: row.get(2)?,
+                            room: row.get(3)?,
+                            source_file: row.get(4)?,
+                            valid_from: row.get(5)?,
+                            valid_to: row.get(6)?,
+                            score: 0.0,
+                            importance: compute_decayed_importance(
+                                base_score,
+                                last_accessed,
+                                access_count,
+                            ),
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(records)
+            })();
+            let is_empty = match &result {
+                Ok(v) => v.is_empty(),
+                Err(_) => true,
+            };
+            chunks.push(result);
+            if is_empty {
+                break;
+            }
+            offset += chunk_size;
+        }
+        chunks
+    }
+
     pub fn get_all_ids(&self, wing: Option<&str>) -> Result<Vec<i64>> {
         if let Some(w) = wing {
             let mut stmt = self.db.prepare("SELECT id FROM memories WHERE wing = ?1")?;

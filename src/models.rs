@@ -8,7 +8,7 @@ pub enum EntityType {
     Uncertain,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct DetectedEntity {
     pub name: String,
     pub unique_id: Option<String>,
