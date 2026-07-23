@@ -146,20 +146,13 @@ pub fn decode_robust(raw: &[u8]) -> String {
 
 /// True if `path` is an iCloud cloud-only placeholder.
 ///
-/// On macOS, this checks the `st_flags` dataless bit. On other platforms it
-/// only checks the literal `.icloud` suffix.
+/// On all platforms this checks the literal `.icloud` suffix.
+/// The macOS `st_flags` dataless-bit check requires libc and is not
+/// currently used.
 pub fn is_icloud_dataless(path: &Path) -> bool {
     if let Some(ext) = path.extension() {
         if ext.to_string_lossy().to_lowercase() == "icloud" {
             return true;
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        use std::os::unix::fs::MetadataExt;
-        const DATALESS_FLAG: u32 = 0x40000000;
-        if let Ok(meta) = path.symlink_metadata() {
-            return (meta.st_flags() & DATALESS_FLAG) != 0;
         }
     }
     false
@@ -356,7 +349,7 @@ fn extract_docx(path: &Path) -> Result<(Option<String>, ExtractionStatus)> {
                     }
                     Ok(Event::Text(e)) => {
                         if in_text {
-                            text.push_str(&e.decode().unwrap_or_default());
+                            text.push_str(&String::from_utf8_lossy(e.as_ref()));
                         }
                     }
                     Ok(Event::End(e)) => {
@@ -724,7 +717,7 @@ fn extract_text_from_xml(xml: &str, tag: &[u8]) -> String {
             }
             Ok(Event::Text(e)) => {
                 if in_tag {
-                    text.push_str(&e.decode().unwrap_or_default());
+                    text.push_str(&String::from_utf8_lossy(e.as_ref()));
                 }
             }
             Ok(Event::End(e)) => {
