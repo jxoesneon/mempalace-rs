@@ -51,6 +51,18 @@ pub struct McpServer {
     semaphore: Arc<Semaphore>,
 }
 
+/// Applies the diary's "(via MCP)" agent-identity tag (Round 4 anti-spoofing
+/// fix), used identically by both `mempalace_diary_write` and
+/// `mempalace_diary_read` so a caller who only ever uses the untagged agent
+/// name still reads back what it wrote.
+fn tag_via_mcp(agent: &str) -> String {
+    if agent.ends_with("(via MCP)") {
+        agent.to_string()
+    } else {
+        format!("{} (via MCP)", agent)
+    }
+}
+
 impl McpServer {
     pub async fn new(config: MempalaceConfig) -> Result<Self> {
         let _ = std::fs::create_dir_all(&config.config_dir);
@@ -823,26 +835,35 @@ impl McpServer {
     }
 
     pub async fn mempalace_diary_write(&self, args: &Value) -> Result<Value> {
-        let agent = args["agent"]
+        let agent_input = args["agent"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing agent"))?;
+
+        // Round 4 Fix: Sanitize and Tag Agent Identity to prevent spoofing
+        // We enforce a "(via MCP)" suffix for all entries written through this interface
+        let agent = tag_via_mcp(agent_input);
 
         let content = args["content"]
             .as_str()
             .or_else(|| args["summary"].as_str())
             .ok_or_else(|| anyhow!("Missing content or summary"))?;
 
-        diary::write_diary(agent, content)?;
+        diary::write_diary(&agent, content)?;
         Ok(json!({ "status": "success", "agent": agent }))
     }
 
     pub async fn mempalace_diary_read(&self, args: &Value) -> Result<Value> {
-        let agent = args["agent"]
+        let agent_input = args["agent"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing agent"))?;
         let last_n = args["last_n"].as_u64().unwrap_or(5).min(1000) as usize;
 
-        let entries = diary::read_diary(agent, last_n)?;
+        // Reads must apply the same "(via MCP)" tagging mempalace_diary_write
+        // enforces, or a caller who never learns the tagged form (for example
+        // one following an agent-identity convention documented elsewhere)
+        // gets an empty result for entries that do exist.
+        let agent = tag_via_mcp(agent_input);
+        let entries = diary::read_diary(&agent, last_n)?;
         Ok(json!({ "entries": entries }))
     }
 
@@ -1068,7 +1089,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(write_res["status"], "success");
-        assert_eq!(write_res["agent"], "test-agent");
+        assert_eq!(write_res["agent"], "test-agent (via MCP)");
 
         let read_res = server
             .mempalace_diary_read(&json!({ "agent": "test-agent", "last_n": 5 }))
@@ -1076,5 +1097,41 @@ mod tests {
             .unwrap();
         let entries = read_res["entries"].as_array().unwrap();
         assert_eq!(entries[0]["content"], "hello summary");
+    }
+
+    #[test]
+    fn tag_via_mcp_appends_the_suffix_once() {
+        assert_eq!(
+            tag_via_mcp("claude-contextos"),
+            "claude-contextos (via MCP)"
+        );
+        assert_eq!(
+            tag_via_mcp("claude-contextos (via MCP)"),
+            "claude-contextos (via MCP)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_diary_write_and_read_round_trip_with_untagged_agent_name() {
+        let (config, _td) = setup_test();
+        let server = McpServer::new_test(config);
+
+        // diary::{write,read}_diary resolve $HOME independently of
+        // MempalaceConfig's own config_dir, so isolate them here the same
+        // way diary.rs's own test does.
+        let diary_home = tempfile::tempdir().unwrap();
+        std::env::set_var("HOME", diary_home.path());
+
+        let write_args = json!({ "agent": "round-trip-agent", "content": "hello" });
+        server.mempalace_diary_write(&write_args).await.unwrap();
+
+        // A caller reading back with the same, untagged agent name it wrote
+        // with must find the entry -- this is the read/write symmetry bug
+        // being fixed here.
+        let read_args = json!({ "agent": "round-trip-agent", "last_n": 5 });
+        let result = server.mempalace_diary_read(&read_args).await.unwrap();
+        let entries = result["entries"].as_array().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0]["content"], "hello");
     }
 }
