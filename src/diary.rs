@@ -141,7 +141,7 @@ impl Diary {
 }
 
 pub fn get_diary_path() -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    let home = crate::config::home_dir();
     let path = std::path::PathBuf::from(&home)
         .join(".mempalace")
         .join("diary.db");

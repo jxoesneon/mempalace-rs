@@ -89,7 +89,7 @@ pub fn bootstrap_files(
     let mempalace_dir = match base_path {
         Some(p) => p,
         None => {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            let home = crate::config::home_dir();
             PathBuf::from(home).join(".mempalace")
         }
     };
