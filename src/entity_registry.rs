@@ -200,7 +200,7 @@ pub struct EntityRegistry {
 impl EntityRegistry {
     pub fn new(path: Option<PathBuf>) -> Result<Self> {
         let path = path.unwrap_or_else(|| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            let home = crate::config::home_dir();
             PathBuf::from(home)
                 .join(".mempalace")
                 .join("entity_registry.json")

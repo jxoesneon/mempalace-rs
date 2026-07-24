@@ -25,6 +25,13 @@ impl EmbedderFactory {
             .map(PathBuf::from)
             .filter(|p| p.exists())
             .or_else(|| {
+                // Shared cache populated by the `download-model` binary,
+                // reusable across every application on the machine.
+                let shared = PathBuf::from(crate::config::home_dir()).join(".fastembed_cache");
+                Some(shared).filter(|p| p.exists())
+            })
+            .or_else(|| {
+                // Legacy location: a `models` directory next to the executable.
                 std::env::current_exe()
                     .ok()
                     .and_then(|exe| exe.parent().map(|p| p.join("models")))

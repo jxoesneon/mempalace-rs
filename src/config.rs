@@ -131,7 +131,7 @@ pub struct MempalaceConfig {
 
 impl Default for MempalaceConfig {
     fn default() -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        let home = home_dir();
         let config_dir = PathBuf::from(&home).join(".mempalace");
 
         let mut config = Self {
@@ -150,23 +150,29 @@ impl Default for MempalaceConfig {
     }
 }
 
-/// Expand a leading `~` or `~/` in a path string using the `HOME` env var.
+/// Returns the current user's home directory, checking `HOME` first (Unix)
+/// and falling back to `USERPROFILE` (Windows) before defaulting to `"."` .
+pub fn home_dir() -> String {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".into())
+}
+
+/// Expand a leading `~` or `~/` in a path string using the home directory.
 /// Paths that do not start with `~` are returned unchanged.
 fn expand_tilde(path: &str) -> String {
     if path == "~" {
-        return std::env::var("HOME").unwrap_or_else(|_| path.to_string());
+        return home_dir();
     }
     if let Some(rest) = path.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return format!("{home}/{rest}");
-        }
+        return format!("{}/{rest}", home_dir());
     }
     path.to_string()
 }
 
 impl MempalaceConfig {
     pub fn new(config_dir: Option<PathBuf>) -> Self {
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        let home = home_dir();
         let dir = config_dir.unwrap_or_else(|| PathBuf::from(&home).join(".mempalace"));
 
         let mut config = Self {
