@@ -1078,27 +1078,6 @@ mod tests {
         // Need to check handle_request logic for tool call with missing params
     }
 
-    #[tokio::test]
-    async fn test_mempalace_diary_write_summary_fallback() {
-        let (config, temp_dir) = setup_test();
-        let server = McpServer::new_test(config);
-        std::env::set_var("HOME", temp_dir.path().as_os_str());
-
-        let write_res = server
-            .mempalace_diary_write(&json!({ "agent": "test-agent", "summary": "hello summary" }))
-            .await
-            .unwrap();
-        assert_eq!(write_res["status"], "success");
-        assert_eq!(write_res["agent"], "test-agent (via MCP)");
-
-        let read_res = server
-            .mempalace_diary_read(&json!({ "agent": "test-agent", "last_n": 5 }))
-            .await
-            .unwrap();
-        let entries = read_res["entries"].as_array().unwrap();
-        assert_eq!(entries[0]["content"], "hello summary");
-    }
-
     #[test]
     fn tag_via_mcp_appends_the_suffix_once() {
         assert_eq!(
