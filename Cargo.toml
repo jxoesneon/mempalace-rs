@@ -22,31 +22,31 @@ exclude = [
 ]
 
 [dependencies]
-clap = { version = "4.6.0", features = ["derive"] }
+clap = { version = "4.6.2", features = ["derive"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 anyhow = "1.0.102"
 async-trait = "0.1"
 rand = "0.9"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "=0.40.1", features = ["bundled"] }
 # chromadb = "2.3.0"  # Replaced by pure-Rust usearch + fastembed
-tokio = { version = "1.51.0", features = ["full"] }
+tokio = { version = "1.53.0", features = ["full"] }
 mcp_rs = { version = "0.1.0" }
 futures = "0.3.32"
 walkdir = "2.5.0"
 regex = "1.12.3"
 chrono = "0.4.44"
 symspell = "0.3.0"
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13.4", features = ["json"] }
 rayon = "1.10"
 dialoguer = "0.11"
 tempfile = "3.27.0"
 lazy_static = "1.5.0"
-sha2 = "0.10"
+sha2 = "0.11.0"
 hex = "0.4.3"
 
 # Pure-Rust storage engine dependencies (replaces ChromaDB)
-fastembed = "4"
+fastembed = "5.17.3"
 usearch = "2"
 ignore = "0.4.25"
 tracing = "0.1.44"
@@ -56,7 +56,7 @@ quick-xml = "0.36"
 csv = "1.3"
 encoding_rs = "0.8"
 serde_yaml = "0.9"
-toml = "0.8"
+toml = "1.1.3"
 
 [[bin]]
 name = "update-benchmarks"

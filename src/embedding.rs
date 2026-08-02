@@ -22,6 +22,7 @@ impl Embedder for FastEmbedder {
     fn embed(&self, text: &str) -> Result<Vec<f32>> {
         let embedder = crate::embedder_factory::EmbedderFactory::get_embedder()
             .context("failed to get embedder")?;
+        let mut embedder = embedder.lock().expect("embedder mutex poisoned");
         let mut out = embedder
             .embed(vec![text.to_string()], None)
             .context("embedding failed")?;
@@ -31,6 +32,7 @@ impl Embedder for FastEmbedder {
     fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>> {
         let embedder = crate::embedder_factory::EmbedderFactory::get_embedder()
             .context("failed to get embedder")?;
+        let mut embedder = embedder.lock().expect("embedder mutex poisoned");
         embedder
             .embed(texts.to_vec(), None)
             .context("batch embedding failed")
