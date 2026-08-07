@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 lazy_static! {
-    static ref GLOBAL_EMBEDDER: Mutex<Option<Arc<TextEmbedding>>> = Mutex::new(None);
+    static ref GLOBAL_EMBEDDER: Mutex<Option<Arc<Mutex<TextEmbedding>>>> = Mutex::new(None);
 }
 
 pub struct EmbedderFactory;
@@ -13,7 +13,7 @@ pub struct EmbedderFactory;
 impl EmbedderFactory {
     /// Returns a cloned Arc to the global singleton TextEmbedding engine.
     /// Thread-safe and initialized exactly once per process.
-    pub fn get_embedder() -> Result<Arc<TextEmbedding>> {
+    pub fn get_embedder() -> Result<Arc<Mutex<TextEmbedding>>> {
         let mut guard = GLOBAL_EMBEDDER.lock().unwrap();
 
         if let Some(emb) = &*guard {
@@ -25,6 +25,13 @@ impl EmbedderFactory {
             .map(PathBuf::from)
             .filter(|p| p.exists())
             .or_else(|| {
+                // Shared cache populated by the `download-model` binary,
+                // reusable across every application on the machine.
+                let shared = PathBuf::from(crate::config::home_dir()).join(".fastembed_cache");
+                Some(shared).filter(|p| p.exists())
+            })
+            .or_else(|| {
+                // Legacy location: a `models` directory next to the executable.
                 std::env::current_exe()
                     .ok()
                     .and_then(|exe| exe.parent().map(|p| p.join("models")))
@@ -46,7 +53,7 @@ impl EmbedderFactory {
             }
         };
 
-        let arc_emb = Arc::new(emb);
+        let arc_emb = Arc::new(Mutex::new(emb));
         *guard = Some(arc_emb.clone());
         Ok(arc_emb)
     }

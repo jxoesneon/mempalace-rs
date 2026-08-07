@@ -35,7 +35,7 @@ pub struct PruneReport {
 impl Layer0 {
     pub fn new(path: Option<PathBuf>) -> Self {
         let path = path.unwrap_or_else(|| {
-            let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+            let home = crate::config::home_dir();
             PathBuf::from(&home).join(".mempalace").join("identity.txt")
         });
         Self { path, text: None }

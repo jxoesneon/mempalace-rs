@@ -6,7 +6,7 @@
 //   • usearch       → SIMD-accelerated HNSW ANN index
 
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
@@ -69,7 +69,7 @@ fn build_index() -> Result<Index> {
 
 /// The pure-Rust vector storage engine combining SQLite metadata and usearch HNSW index.
 pub struct VectorStorage {
-    pub embedder: Arc<TextEmbedding>,
+    pub embedder: Arc<Mutex<TextEmbedding>>,
     pub db: Connection,
     pub index: Index,
 }
@@ -83,7 +83,7 @@ impl VectorStorage {
     pub fn new_with_embedder(
         db_path: impl AsRef<Path>,
         index_path: impl AsRef<Path>,
-        embedder: Arc<TextEmbedding>,
+        embedder: Arc<Mutex<TextEmbedding>>,
     ) -> Result<Self> {
         // 2. SQLite
         let db = Connection::open(db_path.as_ref())
@@ -294,10 +294,10 @@ impl VectorStorage {
         );
 
         let mut stmt = self.db.prepare(&sql)?;
-        let params_vec: Vec<&dyn rusqlite::ToSql> = results
-            .keys
+        let result_ids: Vec<i64> = results.keys.iter().map(|&key| key as i64).collect();
+        let params_vec: Vec<&dyn rusqlite::ToSql> = result_ids
             .iter()
-            .map(|k| k as &dyn rusqlite::ToSql)
+            .map(|id| id as &dyn rusqlite::ToSql)
             .collect();
 
         let mut record_map: std::collections::HashMap<i64, MemoryRecord> = stmt
@@ -372,10 +372,10 @@ impl VectorStorage {
         );
 
         let mut stmt = self.db.prepare(&sql)?;
-        let params_vec: Vec<&dyn rusqlite::ToSql> = results
-            .keys
+        let result_ids: Vec<i64> = results.keys.iter().map(|&key| key as i64).collect();
+        let params_vec: Vec<&dyn rusqlite::ToSql> = result_ids
             .iter()
-            .map(|k| k as &dyn rusqlite::ToSql)
+            .map(|id| id as &dyn rusqlite::ToSql)
             .collect();
 
         let mut record_map: std::collections::HashMap<i64, MemoryRecord> = stmt
@@ -681,8 +681,8 @@ impl VectorStorage {
 
     pub fn embed_single(&self, text: &str) -> Result<Vec<f32>> {
         let safe_text = text.chars().take(8192).collect::<String>();
-        let mut batch = self
-            .embedder
+        let mut embedder = self.embedder.lock().expect("embedder mutex poisoned");
+        let mut batch = embedder
             .embed(vec![safe_text], None)
             .context("fastembed failed")?;
         let vec = batch.pop().ok_or_else(|| anyhow!("Empty batch"))?;
@@ -701,8 +701,8 @@ impl VectorStorage {
             .into_iter()
             .map(|t| t.chars().take(8192).collect::<String>())
             .collect();
-        let embeddings = self
-            .embedder
+        let mut embedder = self.embedder.lock().expect("embedder mutex poisoned");
+        let embeddings = embedder
             .embed(safe_texts, None)
             .context("fastembed failed")?;
         Ok(embeddings)
