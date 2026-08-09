@@ -607,7 +607,7 @@ fn detect_framework(data: &serde_json::Value) -> Option<String> {
 }
 
 fn parse_cargo_toml(text: &str) -> (Option<String>, Vec<String>, Vec<String>) {
-    let value: toml::Value = match text.parse() {
+    let value: toml::Table = match text.parse() {
         Ok(v) => v,
         Err(_) => return (None, Vec::new(), Vec::new()),
     };
@@ -645,7 +645,7 @@ fn parse_cargo_toml(text: &str) -> (Option<String>, Vec<String>, Vec<String>) {
 }
 
 fn parse_pyproject(text: &str) -> (Option<String>, Vec<String>, Vec<String>) {
-    let value: toml::Value = match text.parse() {
+    let value: toml::Table = match text.parse() {
         Ok(v) => v,
         Err(_) => return (None, Vec::new(), Vec::new()),
     };
@@ -975,7 +975,7 @@ fn manifest_name(manifest: &str, text: &str) -> Option<String> {
                     .map(|s| s.to_string())
             }),
         "Cargo.toml" | "pyproject.toml" => {
-            let v = text.parse::<toml::Value>().ok()?;
+            let v = text.parse::<toml::Table>().ok()?;
             v.get("package").or_else(|| v.get("project")).and_then(|t| {
                 t.get("name")
                     .and_then(|n| n.as_str())
