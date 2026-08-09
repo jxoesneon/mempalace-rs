@@ -32,64 +32,109 @@ pub const CHUNK_SIZE: usize = 800;
 pub const CHUNK_OVERLAP: usize = 100;
 pub const MIN_CHUNK_SIZE: usize = 50;
 
-pub fn chunk_text(content: &str) -> Vec<String> {
-    let content = content.trim();
-    if content.is_empty() {
-        return vec![];
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChunkMetadata {
+    pub content: String,
+    pub chunk_index: usize,
+    pub line_start: usize,
+    pub line_end: usize,
+}
+
+pub fn chunk_text_with_config(
+    content: &str,
+    chunk_size: usize,
+    chunk_overlap: usize,
+    min_chunk_size: usize,
+) -> Result<Vec<ChunkMetadata>> {
+    if chunk_size == 0 {
+        anyhow::bail!("chunk_size must be a positive integer");
+    }
+    if chunk_overlap > chunk_size / 2 {
+        anyhow::bail!(
+            "chunk_overlap ({}) must be at most chunk_size / 2 ({}); a larger overlap can loop forever (#2056)",
+            chunk_overlap,
+            chunk_size / 2
+        );
+    }
+    let content_trimmed = content.trim();
+    if content_trimmed.is_empty() {
+        return Ok(vec![]);
     }
 
     let mut chunks = Vec::new();
     let mut start = 0;
+    let mut chunk_index = 0;
+
+    let mut nl_before_start = 0usize;
+    let mut start_anchor = 0usize;
+    let mut nl_before_end = 0usize;
+    let mut end_anchor = 0usize;
 
     while start < content.len() {
-        // Ensure start is at a char boundary
         while start < content.len() && !content.is_char_boundary(start) {
             start += 1;
         }
-
         if start >= content.len() {
             break;
         }
 
-        let mut end = std::cmp::min(start + CHUNK_SIZE, content.len());
+        let mut end = std::cmp::min(start + chunk_size, content.len());
 
-        // Find nearest char boundary for end BEFORE any slicing
         while end > start && !content.is_char_boundary(end) {
             end -= 1;
         }
 
         if end < content.len() {
-            // Try to break at paragraph boundary
-            // Now safe to slice because we verified end is a char boundary
             let slice = &content[start..end];
             if let Some(newline_pos) = slice.rfind("\n\n") {
-                if newline_pos > CHUNK_SIZE / 2 {
+                if newline_pos > chunk_size / 2 {
                     end = start + newline_pos;
                 }
             } else if let Some(newline_pos) = slice.rfind('\n') {
-                if newline_pos > CHUNK_SIZE / 2 {
+                if newline_pos > chunk_size / 2 {
                     end = start + newline_pos;
                 }
             }
         }
 
-        // Re-ensure end is at a char boundary after searching for newlines
         while end > start && !content.is_char_boundary(end) {
             end -= 1;
         }
 
         let chunk = content[start..end].trim();
-        if chunk.len() >= MIN_CHUNK_SIZE {
-            chunks.push(chunk.to_string());
+        if chunk.len() >= min_chunk_size {
+            // O(N) incremental line counting (#2054)
+            let line_start = if start >= start_anchor {
+                nl_before_start += content[start_anchor..start].matches('\n').count();
+                start_anchor = start;
+                nl_before_start + 1
+            } else {
+                content[..start].matches('\n').count() + 1
+            };
+
+            let line_end = if end >= end_anchor {
+                nl_before_end += content[end_anchor..end].matches('\n').count();
+                end_anchor = end;
+                nl_before_end + 1
+            } else {
+                content[..end].matches('\n').count() + 1
+            };
+
+            chunks.push(ChunkMetadata {
+                content: chunk.to_string(),
+                chunk_index,
+                line_start,
+                line_end,
+            });
+            chunk_index += 1;
         }
 
         if end >= content.len() {
             break;
         }
 
-        // Compute overlap and ensure start is at a char boundary
-        let next_start = if end > CHUNK_OVERLAP {
-            let mut s = end - CHUNK_OVERLAP;
+        let next_start = if end > chunk_overlap {
+            let mut s = end - chunk_overlap;
             while s < end && !content.is_char_boundary(s) {
                 s += 1;
             }
@@ -109,7 +154,13 @@ pub fn chunk_text(content: &str) -> Vec<String> {
         }
     }
 
-    chunks
+    Ok(chunks)
+}
+
+pub fn chunk_text(content: &str) -> Vec<String> {
+    chunk_text_with_config(content, CHUNK_SIZE, CHUNK_OVERLAP, MIN_CHUNK_SIZE)
+        .map(|chunks| chunks.into_iter().map(|c| c.content).collect())
+        .unwrap_or_default()
 }
 
 pub fn detect_room(
@@ -847,4 +898,32 @@ mod tests {
         );
         assert!(result.is_none());
     }
+
+    #[test]
+    fn test_chunk_text_with_config_validation() {
+        let content = "line 1\nline 2\nline 3\nline 4\nline 5";
+        // Valid half overlap
+        let res = chunk_text_with_config(content, 100, 50, 5);
+        assert!(res.is_ok());
+
+        // Invalid overlap > chunk_size / 2 (#2056)
+        let err = chunk_text_with_config(content, 100, 51, 5);
+        assert!(err.is_err());
+        assert!(err.unwrap_err().to_string().contains("#2056"));
+
+        // Invalid zero chunk_size
+        assert!(chunk_text_with_config(content, 0, 0, 5).is_err());
+    }
+
+    #[test]
+    fn test_chunk_text_line_locators() {
+        let content = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8";
+        let chunks = chunk_text_with_config(content, 30, 10, 5).unwrap();
+        assert!(!chunks.is_empty());
+        for c in &chunks {
+            assert!(c.line_start <= c.line_end);
+            assert!(c.line_start >= 1);
+        }
+    }
 }
+

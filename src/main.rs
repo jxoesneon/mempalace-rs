@@ -91,8 +91,18 @@ enum Commands {
         #[arg(short, long)]
         wing: Option<String>,
     },
+    #[command(name = "write-routing", about = "Resolve and test write routing policy")]
+    WriteRouting {
+        #[arg(short, long, help = "Policy override: direct, prefer, require")]
+        policy: Option<String>,
+        #[arg(long, help = "Simulate daemon availability")]
+        daemon_available: bool,
+        #[arg(long, help = "Simulate whether daemon can auto-start")]
+        daemon_can_start: bool,
+    },
     #[command(name = "mcp-server", about = "Run the MCP server over stdio")]
     McpServer,
+
     #[command(about = "Run evaluations and benchmarks")]
     Benchmark {
         #[command(subcommand)]
@@ -259,6 +269,29 @@ Call `mempalace_status` periodically to understand your context window budget an
         Commands::McpServer => {
             mempalace_rs::mcp_server::run_mcp_server().await?;
         }
+        Commands::WriteRouting {
+            policy,
+            daemon_available,
+            daemon_can_start,
+        } => {
+            use mempalace_rs::write_routing::*;
+            let candidates = vec![
+                RoutingPolicyCandidate {
+                    source: "cli-flag".to_string(),
+                    value: policy.unwrap_or_default(),
+                    legacy_boolean: false,
+                },
+                RoutingPolicyCandidate {
+                    source: "config".to_string(),
+                    value: config.write_routing_policy.to_string(),
+                    legacy_boolean: false,
+                },
+            ];
+            let resolved = resolve_write_routing_policy(&candidates, WriteRoutingPolicy::Direct)?;
+            let decision = choose_write_route(resolved.policy, daemon_available, daemon_can_start);
+            println!("{}", serde_json::to_string_pretty(&decision)?);
+        }
+
         Commands::Benchmark { bench_type } => {
             let temp_dir = tempfile::tempdir()?;
             let db_path = temp_dir.path().join("bench.db");

@@ -122,11 +122,29 @@ pub struct MempalaceConfig {
     pub topic_wings: Vec<String>,
     pub hall_keywords: HashMap<String, Vec<String>>,
     pub people_map: HashMap<String, String>,
+    #[serde(default = "default_write_routing_policy")]
+    pub write_routing_policy: crate::write_routing::WriteRoutingPolicy,
+    #[serde(default = "default_chunk_size")]
+    pub chunk_size: usize,
+    #[serde(default = "default_chunk_overlap")]
+    pub chunk_overlap: usize,
     /// Phase 4: optional path to an external emotions.json file.
     /// Format: `{"joy": "joy", "custom_emotion": "cst", ...}`
     /// When present, entries are merged on top of the built-in emotion codes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub emotions_path: Option<PathBuf>,
+}
+
+fn default_write_routing_policy() -> crate::write_routing::WriteRoutingPolicy {
+    crate::write_routing::WriteRoutingPolicy::Direct
+}
+
+fn default_chunk_size() -> usize {
+    800
+}
+
+fn default_chunk_overlap() -> usize {
+    100
 }
 
 impl Default for MempalaceConfig {
@@ -141,6 +159,9 @@ impl Default for MempalaceConfig {
             topic_wings: default_topic_wings(),
             hall_keywords: default_hall_keywords(),
             people_map: HashMap::new(),
+            write_routing_policy: crate::write_routing::WriteRoutingPolicy::Direct,
+            chunk_size: 800,
+            chunk_overlap: 100,
             emotions_path: None,
         };
 
@@ -182,6 +203,9 @@ impl MempalaceConfig {
             topic_wings: default_topic_wings(),
             hall_keywords: default_hall_keywords(),
             people_map: HashMap::new(),
+            write_routing_policy: crate::write_routing::WriteRoutingPolicy::Direct,
+            chunk_size: 800,
+            chunk_overlap: 100,
             emotions_path: None,
         };
 
@@ -189,6 +213,17 @@ impl MempalaceConfig {
         config.load_people_map();
         config.apply_env_overrides();
         config
+    }
+
+    pub fn validate_chunk_config(&self) -> (usize, usize) {
+        let size = if self.chunk_size == 0 { 800 } else { self.chunk_size };
+        let max_overlap = size / 2;
+        let overlap = if self.chunk_overlap > max_overlap {
+            if 100 <= max_overlap { 100 } else { max_overlap }
+        } else {
+            self.chunk_overlap
+        };
+        (size, overlap)
     }
 
     fn load_from_file(&mut self) {
@@ -203,6 +238,18 @@ impl MempalaceConfig {
                     {
                         self.collection_name = name.to_string();
                     }
+                    if let Some(policy) = file_config.get("write_routing_policy").and_then(|v| v.as_str()) {
+                        if let Ok(parsed) = std::str::FromStr::from_str(policy) {
+                            self.write_routing_policy = parsed;
+                        }
+                    }
+                    if let Some(cs) = file_config.get("chunk_size").and_then(|v| v.as_u64()) {
+                        self.chunk_size = cs as usize;
+                    }
+                    if let Some(co) = file_config.get("chunk_overlap").and_then(|v| v.as_u64()) {
+                        self.chunk_overlap = co as usize;
+                    }
+
                     if let Some(wings) = file_config.get("topic_wings").and_then(|v| v.as_array()) {
                         self.topic_wings = wings
                             .iter()

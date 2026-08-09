@@ -499,6 +499,30 @@ impl McpServer {
                             "wing": { "type": "string" }
                         }
                     }
+                },
+                {
+                    "name": "mempalace_checkpoint",
+                    "description": "Save a whole session in one call: semantic-dedups each item, files non-duplicates as drawers, then writes one diary entry.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "items": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "wing": { "type": "string" },
+                                        "room": { "type": "string" },
+                                        "content": { "type": "string" }
+                                    },
+                                    "required": ["wing", "room", "content"]
+                                }
+                            },
+                            "diary": { "type": "object" },
+                            "dedup_threshold": { "type": "number", "default": 0.9 }
+                        },
+                        "required": ["items"]
+                    }
                 }
             ]
         }))
@@ -532,8 +556,10 @@ impl McpServer {
             "mempalace_diary_write" => self.mempalace_diary_write(args).await,
             "mempalace_diary_read" => self.mempalace_diary_read(args).await,
             "mempalace_prune" => self.mempalace_prune(args).await,
+            "mempalace_checkpoint" => self.mempalace_checkpoint(args).await,
             _ => Err(anyhow!("Unknown tool: {}", name)),
         }?;
+
 
         // Wrap in MCP-compliant content format
         Ok(json!({
@@ -896,6 +922,81 @@ impl McpServer {
             "report": report
         }))
     }
+
+    pub async fn mempalace_checkpoint(&self, args: &Value) -> Result<Value> {
+        let items = args["items"]
+            .as_array()
+            .ok_or_else(|| anyhow!("Missing or invalid items array"))?;
+        let dedup_threshold = args["dedup_threshold"].as_f64().unwrap_or(0.9);
+
+        let mut filed_count = 0;
+        let mut skipped_count = 0;
+        let mut results = Vec::new();
+
+        for item in items {
+            let wing = item["wing"].as_str().unwrap_or("general");
+            let room = item["room"].as_str().unwrap_or("general");
+            let content = match item["content"].as_str() {
+                Some(c) => c,
+                None => continue,
+            };
+
+            let dup_args = json!({
+                "content": content,
+                "threshold": dedup_threshold
+            });
+            let dup_res = self.mempalace_check_duplicate(&dup_args).await?;
+            let is_duplicate = dup_res["is_duplicate"].as_bool().unwrap_or(false);
+
+            if is_duplicate {
+                skipped_count += 1;
+                results.push(json!({
+                    "wing": wing,
+                    "room": room,
+                    "status": "skipped_duplicate",
+                    "similarity": dup_res["similarity"]
+                }));
+            } else {
+                let add_args = json!({
+                    "wing": wing,
+                    "room": room,
+                    "content": content
+                });
+                let add_res = self.mempalace_add_drawer(&add_args).await?;
+                filed_count += 1;
+                results.push(json!({
+                    "wing": wing,
+                    "room": room,
+                    "status": "filed",
+                    "memory_id": add_res["memory_id"]
+                }));
+            }
+        }
+
+        let mut diary_written = false;
+        if let Some(diary) = args.get("diary").filter(|v| !v.is_null()) {
+            let mut diary_payload = diary.clone();
+            if diary_payload.get("agent").is_none() && diary_payload.get("agent_name").is_some() {
+                diary_payload["agent"] = diary_payload["agent_name"].clone();
+            }
+            if diary_payload.get("content").is_none() && diary_payload.get("entry").is_some() {
+                diary_payload["content"] = diary_payload["entry"].clone();
+            }
+            let diary_res = self.mempalace_diary_write(&diary_payload).await?;
+            if diary_res["status"] == "success" {
+                diary_written = true;
+            }
+        }
+
+        Ok(json!({
+            "status": "success",
+            "filed_count": filed_count,
+            "skipped_count": skipped_count,
+            "diary_written": diary_written,
+            "items": results
+        }))
+    }
+
 
     async fn wal_log(&self, operation: &str, params: Value) {
         let wal_dir = self.config.config_dir.join("wal");

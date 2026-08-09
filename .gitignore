@@ -28,3 +28,6 @@ og/
 
 # Upstream Python reference (local clone, not part of Rust codebase)
 upstream/
+
+# Ciel local domain
+.ciel/

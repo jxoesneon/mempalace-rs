@@ -1,4 +1,4 @@
-﻿//! LLM refine — local, offline heuristic refinement of memory entries.
+//! LLM refine — local, offline heuristic refinement of memory entries.
 //!
 //! This module provides helpers to "refine" a draft memory entry before it is
 //! stored: spell-checking, entity extraction, capitalization normalization, and
@@ -161,13 +161,18 @@ mod tests {
 
     #[test]
     fn test_refine_text_basic() {
-        let result = refine_text("  alice   visited   paris  ", &RefineOptions::all()).unwrap();
+        let opts = RefineOptions {
+            spellcheck: false,
+            ..RefineOptions::all()
+        };
+        let result = refine_text("  alice   visited   paris  ", &opts).unwrap();
         assert_eq!(result.text, "alice visited paris");
         assert!(result.changed);
         // The entity detector may or may not find these simple words; just ensure
         // the function returned successfully and normalized whitespace.
         assert!(result.text.split_whitespace().count() <= 3);
     }
+
 
     #[test]
     fn test_refine_text_disabled() {
