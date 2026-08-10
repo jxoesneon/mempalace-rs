@@ -77,10 +77,10 @@ _Verified multi-hop reasoning, 1M+ token persistence, and structural integrity._
 <!-- GOLD_STANDARD_START -->
 | Benchmark | Score | Metric | Latency |
 |-----------|-------|--------|---------|
-| **RULER     ** | 1.000 | nDCG       | 180.0 ms |
-| **STRUCTMEM ** | 1.000 | Structural | 49.0 ms |
-| **BABILONG  ** | 1.000 | Reasoning  | 114.0 ms |
-| **BEAM      ** | 1.000 | Nugget     | 36.0 ms |
+| **RULER     ** | 1.000 | nDCG       | 139.0 ms |
+| **STRUCTMEM ** | 1.000 | Structural | 39.0 ms |
+| **BABILONG  ** | 1.000 | Reasoning  | 90.0 ms |
+| **BEAM      ** | 1.000 | Nugget     | 25.0 ms |
 <!-- GOLD_STANDARD_END -->
 
 > [!TIP]
@@ -93,10 +93,10 @@ _Raw throughput measured on local hardware._
 <!-- BENCH_TABLE_START -->
 | Operation          | Throughput        | Latency |
 |--------------------|-------------------|---------|
-| AAAK Compression   | ~1799 ops/sec     | 556 µs  |
-| Entity Detection   | ~257113 ops/sec   | 4 µs    |
-| Token Counting     | ~3551910 ops/sec  | 282 ns  |
-| Compression Stats  | ~1375409 ops/sec  | 727 ns  |
+| AAAK Compression   | ~2309 ops/sec     | 433 µs  |
+| Entity Detection   | ~333544 ops/sec   | 3 µs    |
+| Token Counting     | ~4904617 ops/sec  | 204 ns  |
+| Compression Stats  | ~1510046 ops/sec  | 662 ns  |
 <!-- BENCH_TABLE_END -->
 
 _Benchmarks performed on Apple Silicon M4. Results are generated autonomously by CI on every release._
