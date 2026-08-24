@@ -188,11 +188,11 @@ impl Searcher {
             ));
         };
 
-        // Use search_room for pre-filtered search if wing+room provided, else global search
-        let records = match (&wing, &room) {
-            (Some(w), Some(r)) => store.search_room(query, w, r, n_results, None)?,
-            _ => store.search(query, n_results)?,
-        };
+        // Route through search_filtered so wing-only and room-only filters
+        // are actually enforced. Previously the `_` arm fell through to the
+        // unfiltered global search, silently dropping the wing/room filter.
+        let records =
+            store.search_filtered(query, wing.as_deref(), room.as_deref(), n_results, None)?;
 
         if records.is_empty() {
             return Ok(format!("\n  No results found for: \"{}\"", query));
@@ -277,10 +277,8 @@ impl Searcher {
             ));
         };
 
-        let records = match (&wing, &room) {
-            (Some(w), Some(r)) => store.search_room(query, w, r, n_results, None)?,
-            _ => store.search(query, n_results)?,
-        };
+        let records =
+            store.search_filtered(query, wing.as_deref(), room.as_deref(), n_results, None)?;
 
         let docs: Vec<String> = records.iter().map(|r| r.text_content.clone()).collect();
         let metas: Vec<Option<serde_json::Map<String, serde_json::Value>>> = records

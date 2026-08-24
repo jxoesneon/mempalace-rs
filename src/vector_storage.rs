@@ -244,26 +244,87 @@ impl VectorStorage {
         limit: usize,
         at_time: Option<i64>,
     ) -> Result<Vec<MemoryRecord>> {
+        // Delegate to the generalized filtered search.
+        self.search_filtered(query, Some(wing), Some(room), limit, at_time)
+    }
+
+    /// Generalized filtered search: pre-filters candidate memory IDs by an
+    /// optional `wing` and/or `room` predicate in SQLite, then runs a
+    /// usearch `filtered_search` over only those candidates.
+    ///
+    /// This is the correct entry point for any search that carries a wing
+    /// filter, a room filter, or both. Callers passing `None` for both
+    /// filters get the same behavior as [`search`].
+    ///
+    /// `search_room` is retained as a thin wrapper for benchmark/CLI
+    /// compatibility; new code should prefer `search_filtered`.
+    pub fn search_filtered(
+        &self,
+        query: &str,
+        wing: Option<&str>,
+        room: Option<&str>,
+        limit: usize,
+        at_time: Option<i64>,
+    ) -> Result<Vec<MemoryRecord>> {
+        // No filters → fall back to the unfiltered global search path.
+        if wing.is_none() && room.is_none() {
+            return self.search(query, limit);
+        }
+
         if limit == 0 {
             return Ok(vec![]);
         }
         let at_time = at_time.unwrap_or_else(now_unix);
         let query_vector = self.embed_single(query)?;
 
+        // Build a parameterized WHERE clause matching the supplied filters.
+        // Both filters present  → `wing = ? AND room = ?`  (params: w, r, at_time)
+        // Wing only             → `wing = ?`               (params: w, at_time)
+        // Room only             → `room = ?`               (params: r, at_time)
+        // Each branch uses sequential `?` placeholders so rusqlite's positional
+        // binding lines up 1:1 with the params vector.
         let mut stmt = self.db.prepare_cached(
-            "SELECT id FROM memories
-             WHERE wing = ?1 AND room = ?2
-               AND valid_from <= ?3
-               AND (valid_to IS NULL OR valid_to >= ?3)",
+            match (wing, room) {
+                (Some(_), Some(_)) => {
+                    "SELECT id FROM memories
+                     WHERE wing = ? AND room = ?
+                       AND valid_from <= ?
+                       AND (valid_to IS NULL OR valid_to >= ?)"
+                }
+                (Some(_), None) => {
+                    "SELECT id FROM memories
+                     WHERE wing = ?
+                       AND valid_from <= ?
+                       AND (valid_to IS NULL OR valid_to >= ?)"
+                }
+                (None, Some(_)) => {
+                    "SELECT id FROM memories
+                     WHERE room = ?
+                       AND valid_from <= ?
+                       AND (valid_to IS NULL OR valid_to >= ?)"
+                }
+                // Unreachable: both-None returned above.
+                (None, None) => unreachable!("search_filtered both-None handled early"),
+            },
         )?;
 
-        let candidate_ids: Vec<u64> = stmt
-            .query_map(params![wing, room, at_time], |row| row.get::<_, i64>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?
-            .into_iter()
-            .map(|id| id as u64)
-            .collect();
+        // Each `?` in the SQL consumes one positional param. The temporal
+        // guard references `at_time` twice (valid_from <= ? AND valid_to >= ?),
+        // so we bind it twice.
+        let rows: Vec<i64> = match (wing, room) {
+            (Some(w), Some(r)) => stmt
+                .query_map(params![w, r, at_time, at_time], |row| row.get::<_, i64>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+            (Some(w), None) => stmt
+                .query_map(params![w, at_time, at_time], |row| row.get::<_, i64>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+            (None, Some(r)) => stmt
+                .query_map(params![r, at_time, at_time], |row| row.get::<_, i64>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?,
+            (None, None) => vec![],
+        };
 
+        let candidate_ids: Vec<u64> = rows.into_iter().map(|id| id as u64).collect();
         if candidate_ids.is_empty() {
             return Ok(vec![]);
         }
@@ -869,6 +930,69 @@ mod tests {
 
         let results = vs.search("unknown", 1).unwrap();
         assert!(results.is_empty());
+    }
+
+    /// Regression test for the wing-filter defect: searching with a wing
+    /// filter but no room filter must only return memories from that wing.
+    /// Previously the `_` arm in searcher.rs/storage.rs fell through to the
+    /// unfiltered global `search()`, leaking cross-wing results.
+    #[test]
+    fn test_search_filtered_wing_only() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("db.sqlite");
+        let index_path = dir.path().join("index.usearch");
+        let mut vs = VectorStorage::new(&db_path, &index_path).unwrap();
+
+        // Seed two wings with distinct content.
+        vs.add_memory("rust async tokio runtime", "rust", "async", None, None)
+            .unwrap();
+        vs.add_memory("python django web framework", "python", "web", None, None)
+            .unwrap();
+        vs.add_memory("rust ownership lifetimes borrow", "rust", "ownership", None, None)
+            .unwrap();
+
+        // Wing-only filter: must return ONLY rust-wing memories.
+        let results = vs
+            .search_filtered("programming language", Some("rust"), None, 10, None)
+            .unwrap();
+        assert!(!results.is_empty(), "wing filter should not drop all results");
+        for r in &results {
+            assert_eq!(
+                r.wing, "rust",
+                "wing filter leaked: got wing '{}', expected 'rust'",
+                r.wing
+            );
+        }
+
+        // Wing-only filter for the other wing.
+        let results_py = vs
+            .search_filtered("programming language", Some("python"), None, 10, None)
+            .unwrap();
+        assert!(!results_py.is_empty());
+        for r in &results_py {
+            assert_eq!(r.wing, "python");
+        }
+
+        // No filter → global search returns memories from both wings.
+        let results_all = vs
+            .search_filtered("programming language", None, None, 10, None)
+            .unwrap();
+        assert!(results_all.len() >= 2);
+
+        // Room-only filter: must return ONLY memories from that room.
+        let results_room = vs
+            .search_filtered("programming", None, Some("async"), 10, None)
+            .unwrap();
+        assert!(!results_room.is_empty());
+        for r in &results_room {
+            assert_eq!(r.room, "async");
+        }
+
+        // Non-existent wing → empty results (not a global leak).
+        let results_empty = vs
+            .search_filtered("programming", Some("nonexistent"), None, 10, None)
+            .unwrap();
+        assert!(results_empty.is_empty());
     }
 }
 
