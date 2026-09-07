@@ -560,7 +560,6 @@ impl McpServer {
             _ => Err(anyhow!("Unknown tool: {}", name)),
         }?;
 
-
         // Wrap in MCP-compliant content format
         Ok(json!({
             "content": [{
@@ -996,7 +995,6 @@ impl McpServer {
             "items": results
         }))
     }
-
 
     async fn wal_log(&self, operation: &str, params: Value) {
         let wal_dir = self.config.config_dir.join("wal");

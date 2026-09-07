@@ -173,7 +173,6 @@ mod tests {
         assert!(result.text.split_whitespace().count() <= 3);
     }
 
-
     #[test]
     fn test_refine_text_disabled() {
         let result = refine_text("  alice   visited   paris  ", &RefineOptions::default()).unwrap();

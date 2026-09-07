@@ -60,4 +60,3 @@ pub mod vector_storage;
 pub use vector_storage::{MemoryRecord, TemporalRange, VectorStorage};
 pub mod wal;
 pub mod write_routing;
-

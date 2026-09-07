@@ -283,30 +283,28 @@ impl VectorStorage {
         // Room only             → `room = ?`               (params: r, at_time)
         // Each branch uses sequential `?` placeholders so rusqlite's positional
         // binding lines up 1:1 with the params vector.
-        let mut stmt = self.db.prepare_cached(
-            match (wing, room) {
-                (Some(_), Some(_)) => {
-                    "SELECT id FROM memories
+        let mut stmt = self.db.prepare_cached(match (wing, room) {
+            (Some(_), Some(_)) => {
+                "SELECT id FROM memories
                      WHERE wing = ? AND room = ?
                        AND valid_from <= ?
                        AND (valid_to IS NULL OR valid_to >= ?)"
-                }
-                (Some(_), None) => {
-                    "SELECT id FROM memories
+            }
+            (Some(_), None) => {
+                "SELECT id FROM memories
                      WHERE wing = ?
                        AND valid_from <= ?
                        AND (valid_to IS NULL OR valid_to >= ?)"
-                }
-                (None, Some(_)) => {
-                    "SELECT id FROM memories
+            }
+            (None, Some(_)) => {
+                "SELECT id FROM memories
                      WHERE room = ?
                        AND valid_from <= ?
                        AND (valid_to IS NULL OR valid_to >= ?)"
-                }
-                // Unreachable: both-None returned above.
-                (None, None) => unreachable!("search_filtered both-None handled early"),
-            },
-        )?;
+            }
+            // Unreachable: both-None returned above.
+            (None, None) => unreachable!("search_filtered both-None handled early"),
+        })?;
 
         // Each `?` in the SQL consumes one positional param. The temporal
         // guard references `at_time` twice (valid_from <= ? AND valid_to >= ?),
@@ -948,14 +946,23 @@ mod tests {
             .unwrap();
         vs.add_memory("python django web framework", "python", "web", None, None)
             .unwrap();
-        vs.add_memory("rust ownership lifetimes borrow", "rust", "ownership", None, None)
-            .unwrap();
+        vs.add_memory(
+            "rust ownership lifetimes borrow",
+            "rust",
+            "ownership",
+            None,
+            None,
+        )
+        .unwrap();
 
         // Wing-only filter: must return ONLY rust-wing memories.
         let results = vs
             .search_filtered("programming language", Some("rust"), None, 10, None)
             .unwrap();
-        assert!(!results.is_empty(), "wing filter should not drop all results");
+        assert!(
+            !results.is_empty(),
+            "wing filter should not drop all results"
+        );
         for r in &results {
             assert_eq!(
                 r.wing, "rust",

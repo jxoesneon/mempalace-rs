@@ -91,7 +91,10 @@ enum Commands {
         #[arg(short, long)]
         wing: Option<String>,
     },
-    #[command(name = "write-routing", about = "Resolve and test write routing policy")]
+    #[command(
+        name = "write-routing",
+        about = "Resolve and test write routing policy"
+    )]
     WriteRouting {
         #[arg(short, long, help = "Policy override: direct, prefer, require")]
         policy: Option<String>,

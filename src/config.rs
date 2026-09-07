@@ -216,10 +216,18 @@ impl MempalaceConfig {
     }
 
     pub fn validate_chunk_config(&self) -> (usize, usize) {
-        let size = if self.chunk_size == 0 { 800 } else { self.chunk_size };
+        let size = if self.chunk_size == 0 {
+            800
+        } else {
+            self.chunk_size
+        };
         let max_overlap = size / 2;
         let overlap = if self.chunk_overlap > max_overlap {
-            if 100 <= max_overlap { 100 } else { max_overlap }
+            if 100 <= max_overlap {
+                100
+            } else {
+                max_overlap
+            }
         } else {
             self.chunk_overlap
         };
@@ -238,7 +246,10 @@ impl MempalaceConfig {
                     {
                         self.collection_name = name.to_string();
                     }
-                    if let Some(policy) = file_config.get("write_routing_policy").and_then(|v| v.as_str()) {
+                    if let Some(policy) = file_config
+                        .get("write_routing_policy")
+                        .and_then(|v| v.as_str())
+                    {
                         if let Ok(parsed) = std::str::FromStr::from_str(policy) {
                             self.write_routing_policy = parsed;
                         }

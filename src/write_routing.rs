@@ -38,7 +38,10 @@ impl FromStr for WriteRoutingPolicy {
             "direct" => Ok(Self::Direct),
             "prefer" => Ok(Self::Prefer),
             "require" => Ok(Self::Require),
-            _ => bail!("invalid write routing policy '{}'; expected direct, prefer, or require", s),
+            _ => bail!(
+                "invalid write routing policy '{}'; expected direct, prefer, or require",
+                s
+            ),
         }
     }
 }
@@ -98,10 +101,7 @@ impl WriteRoutingDecision {
     }
 }
 
-pub fn parse_write_routing_policy(
-    value: &str,
-    legacy_boolean: bool,
-) -> Result<WriteRoutingPolicy> {
+pub fn parse_write_routing_policy(value: &str, legacy_boolean: bool) -> Result<WriteRoutingPolicy> {
     let normalized = value.trim().to_lowercase();
     if let Ok(policy) = WriteRoutingPolicy::from_str(&normalized) {
         return Ok(policy);

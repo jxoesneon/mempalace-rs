@@ -372,13 +372,7 @@ impl Layer3 {
             Ok(vs) => vs,
             Err(_) => return "Vector storage unavailable.".to_string(),
         };
-        let records = vs.search_filtered(
-            query,
-            wing.as_deref(),
-            room.as_deref(),
-            n_results,
-            None,
-        );
+        let records = vs.search_filtered(query, wing.as_deref(), room.as_deref(), n_results, None);
         let records = match records {
             Ok(r) => r,
             Err(e) => return format!("Search error: {}", e),
