@@ -15,10 +15,10 @@ cargo bench
 <!-- BENCH_TABLE_START -->
 | Operation          | Throughput        | Latency |
 |--------------------|-------------------|---------|
-| AAAK Compression   | ~1771 ops/sec     | 564 µs  |
-| Entity Detection   | ~260331 ops/sec   | 4 µs    |
-| Token Counting     | ~3613554 ops/sec  | 277 ns  |
-| Compression Stats  | ~1435745 ops/sec  | 697 ns  |
+| AAAK Compression   | ~2456 ops/sec     | 407 µs  |
+| Entity Detection   | ~359920 ops/sec   | 3 µs    |
+| Token Counting     | ~4421993 ops/sec  | 226 ns  |
+| Compression Stats  | ~1927062 ops/sec  | 519 ns  |
 <!-- BENCH_TABLE_END -->
 
 **Binary Size**: 7.9 MB (release build)  
@@ -32,10 +32,10 @@ MemPalace-RS adheres to the **2026 Gold Standards** for AI memory validation. We
 <!-- GOLD_STANDARD_START -->
 | Benchmark | Score | Metric | Latency |
 |-----------|-------|--------|---------|
-| **RULER     ** | 1.000 | nDCG       | 191.0 ms |
-| **STRUCTMEM ** | 1.000 | Structural | 60.0 ms |
-| **BABILONG  ** | 1.000 | Reasoning  | 114.0 ms |
-| **BEAM      ** | 1.000 | Nugget     | 34.0 ms |
+| **RULER     ** | 1.000 | nDCG       | 147.0 ms |
+| **STRUCTMEM ** | 1.000 | Structural | 46.0 ms |
+| **BABILONG  ** | 1.000 | Reasoning  | 49.0 ms |
+| **BEAM      ** | 1.000 | Nugget     | 32.0 ms |
 <!-- GOLD_STANDARD_END -->
 
 > [!IMPORTANT]
