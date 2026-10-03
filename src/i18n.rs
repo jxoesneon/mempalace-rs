@@ -483,7 +483,9 @@ fn build_be() -> TranslationSet {
 }
 
 thread_local! {
-    static CURRENT_LOCALE: std::cell::Cell<Locale> = const { std::cell::Cell::new(Locale::En) };
+    // clippy FP (1.98): initializer is already const — expectation self-cleans when upstream fixes it
+    #[expect(clippy::missing_const_for_thread_local)]
+    static CURRENT_LOCALE: std::cell::Cell<Locale> = const { std::cell::Cell::new(Locale::En) }
 }
 
 /// Set the current thread's active locale.

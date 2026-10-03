@@ -128,7 +128,7 @@ impl KnowledgeGraph {
             sub_id,
             pred,
             obj_id,
-            &self.hash_now(valid_from)
+            self.hash_now(valid_from)
         );
 
         self.conn.execute(

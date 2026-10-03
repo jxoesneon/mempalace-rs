@@ -34,7 +34,7 @@ impl Embedder for FastEmbedder {
             .context("failed to get embedder")?;
         let mut embedder = embedder.lock().expect("embedder mutex poisoned");
         embedder
-            .embed(texts.to_vec(), None)
+            .embed(texts, None)
             .context("batch embedding failed")
     }
 }

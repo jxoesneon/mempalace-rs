@@ -1,5 +1,5 @@
 use anyhow::Result;
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 use lazy_static::lazy_static;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -39,7 +39,7 @@ impl EmbedderFactory {
             });
 
         let mut init_opts =
-            InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(false);
+            TextInitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(false);
 
         if let Some(cache) = cache_dir {
             init_opts = init_opts.with_cache_dir(cache);

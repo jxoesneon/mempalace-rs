@@ -344,7 +344,7 @@ impl Dialect {
         }
 
         let mut ranked: Vec<_> = freq.into_iter().collect();
-        ranked.sort_by(|a, b| b.1.cmp(&a.1));
+        ranked.sort_by_key(|a| std::cmp::Reverse(a.1));
         ranked
             .into_iter()
             .take(max_topics)
@@ -405,7 +405,7 @@ impl Dialect {
             scored.push((score, s));
         }
 
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|a| std::cmp::Reverse(a.0));
         let best = scored[0].1;
 
         // Phase 9 Hardening: Sanitize to prevent AAAK segment injection
@@ -888,7 +888,7 @@ impl Dialect {
             })
             .collect();
 
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
+        scored.sort_by_key(|a| std::cmp::Reverse(a.0));
         scored
             .into_iter()
             .take(max_propositions)

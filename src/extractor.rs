@@ -551,7 +551,7 @@ fn extract_topic(text: &str) -> Option<String> {
     }
 
     let mut ranked: Vec<_> = freq.into_iter().collect();
-    ranked.sort_by(|a, b| b.1.cmp(&a.1));
+    ranked.sort_by_key(|a| std::cmp::Reverse(a.1));
     ranked.into_iter().next().map(|(w, _)| w)
 }
 

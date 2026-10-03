@@ -47,12 +47,9 @@ These issues were addressed. The remaining upstream parity work includes the CLI
 
 The following warnings are pre-existing and may be ignored unless you are actively refactoring the affected modules. Do not let them block CI; the goal is to keep the count from increasing:
 
-- `clippy::unnecessary_sort_by` in `src/dialect.rs` (lines 347, 408, 897).
-- `clippy::unnecessary_sort_by` in `src/extractor.rs` (line 554).
 - `clippy::type_complexity` in `src/searcher.rs` (line 590).
 - `clippy::type_complexity` in `src/vector_storage.rs` (line 808).
 - `clippy::too_many_arguments` in `src/vector_storage.rs` (line 979, `add_memories_batch`).
-- `clippy::collapsible_match` in `src/entity_registry.rs` (line 298).
 
 When adding new code, prefer idiomatic Rust to avoid introducing new warnings.
 

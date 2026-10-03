@@ -456,7 +456,7 @@ pub async fn mine_project(
                 &project_path,
             ) {
                 let mut count = 0usize;
-                for (doc, mut meta) in documents.into_iter().zip(metadatas.into_iter()) {
+                for (doc, mut meta) in documents.into_iter().zip(metadatas) {
                     if let Some(agent_name) = &options.agent {
                         meta.insert("author".to_string(), json!(agent_name));
                     }

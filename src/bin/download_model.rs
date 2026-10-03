@@ -1,5 +1,5 @@
 // Simple script to download the fastembed model
-use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
+use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 use mempalace_rs::config::home_dir;
 use std::path::PathBuf;
 use std::thread;
@@ -12,7 +12,7 @@ fn main() {
         cache_dir.display()
     );
     let mut opts =
-        InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(true);
+        TextInitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(true);
     opts = opts.with_cache_dir(cache_dir);
 
     let mut attempts = 0;

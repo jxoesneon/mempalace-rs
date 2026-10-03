@@ -1143,7 +1143,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_request_invalid_json() {
         let (config, _td) = setup_test();
-        let server = Arc::new(McpServer::new_test(config));
+        let _server = Arc::new(McpServer::new_test(config));
 
         // This is a bit tricky since handle_request takes a struct.
         // We'll test the loop part implicitly or just mock the logic if possible.
@@ -1173,7 +1173,7 @@ mod tests {
     #[tokio::test]
     async fn test_handle_request_tool_call_missing_params() {
         let (config, _td) = setup_test();
-        let server = Arc::new(McpServer::new_test(config));
+        let _server = Arc::new(McpServer::new_test(config));
         // Need to check handle_request logic for tool call with missing params
     }
 

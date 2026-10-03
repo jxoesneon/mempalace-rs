@@ -1118,7 +1118,7 @@ mod tests {
 
     #[test]
     fn test_repair_invalid_config() {
-        let temp_dir = tempfile::tempdir().unwrap();
+        let _temp_dir = tempfile::tempdir().unwrap();
         let config = MempalaceConfig {
             config_dir: PathBuf::from("/nonexistent/path"),
             ..Default::default()

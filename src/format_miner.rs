@@ -339,29 +339,29 @@ fn extract_docx(path: &Path) -> Result<(Option<String>, ExtractionStatus)> {
                 match reader.read_event() {
                     Ok(Event::Start(e)) => {
                         let tag = e.name();
-                        if tag == QName(b"w:t") {
+                        if tag == QName("w:t") {
                             in_text = true;
-                        } else if tag == QName(b"w:tab") {
+                        } else if tag == QName("w:tab") {
                             in_tab = true;
-                        } else if tag == QName(b"w:br") {
+                        } else if tag == QName("w:br") {
                             in_br = true;
                         }
                     }
                     Ok(Event::Text(e)) => {
                         if in_text {
-                            text.push_str(&String::from_utf8_lossy(e.as_ref()));
+                            text.push_str(e.as_ref());
                         }
                     }
                     Ok(Event::End(e)) => {
                         let tag = e.name();
-                        if tag == QName(b"w:t") {
+                        if tag == QName("w:t") {
                             in_text = false;
-                        } else if tag == QName(b"w:tab") {
+                        } else if tag == QName("w:tab") {
                             if in_tab {
                                 text.push('\t');
                             }
                             in_tab = false;
-                        } else if tag == QName(b"w:br") {
+                        } else if tag == QName("w:br") {
                             if in_br {
                                 text.push('\n');
                             }
@@ -370,9 +370,9 @@ fn extract_docx(path: &Path) -> Result<(Option<String>, ExtractionStatus)> {
                     }
                     Ok(Event::Empty(e)) => {
                         let tag = e.name();
-                        if tag == QName(b"w:tab") {
+                        if tag == QName("w:tab") {
                             text.push('\t');
-                        } else if tag == QName(b"w:br") {
+                        } else if tag == QName("w:br") {
                             text.push('\n');
                         }
                     }
@@ -405,7 +405,7 @@ fn extract_xlsx(path: &Path) -> Result<(Option<String>, ExtractionStatus)> {
         if name == "xl/sharedstrings.xml" {
             let mut buf = String::new();
             zip_file.read_to_string(&mut buf)?;
-            shared_strings.push_str(&extract_text_from_xml(&buf, b"t"));
+            shared_strings.push_str(&extract_text_from_xml(&buf, "t"));
         }
     }
 
@@ -419,7 +419,7 @@ fn extract_xlsx(path: &Path) -> Result<(Option<String>, ExtractionStatus)> {
         if name.starts_with("xl/worksheets/") && name.ends_with(".xml") {
             let mut buf = String::new();
             zip_file.read_to_string(&mut buf)?;
-            inline_text.push_str(&extract_text_from_xml(&buf, b"v"));
+            inline_text.push_str(&extract_text_from_xml(&buf, "v"));
         }
     }
 
@@ -453,7 +453,7 @@ fn extract_pptx(path: &Path) -> Result<(Option<String>, ExtractionStatus)> {
         if name.starts_with("ppt/slides/") && name.ends_with(".xml") {
             let mut buf = String::new();
             zip_file.read_to_string(&mut buf)?;
-            let slide_text = extract_text_from_xml(&buf, b"a:t");
+            let slide_text = extract_text_from_xml(&buf, "a:t");
             slide_texts.push((name, slide_text));
         }
     }
@@ -494,9 +494,9 @@ fn extract_epub(path: &Path) -> Result<(Option<String>, ExtractionStatus)> {
         loop {
             match reader.read_event() {
                 Ok(Event::Empty(e)) | Ok(Event::Start(e)) => {
-                    if e.name() == QName(b"rootfile") {
+                    if e.name() == QName("rootfile") {
                         for attr in e.attributes().flatten() {
-                            if attr.key == QName(b"full-path") {
+                            if attr.key == QName("full-path") {
                                 opf_path = Some(attr.unescape_value()?.into_owned());
                             }
                         }
@@ -531,14 +531,14 @@ fn extract_epub(path: &Path) -> Result<(Option<String>, ExtractionStatus)> {
             loop {
                 match reader.read_event() {
                     Ok(Event::Empty(e)) | Ok(Event::Start(e)) => {
-                        if e.name() == QName(b"item") {
+                        if e.name() == QName("item") {
                             let mut href = None;
                             let mut media_type = None;
                             for attr in e.attributes().flatten() {
-                                if attr.key == QName(b"href") {
+                                if attr.key == QName("href") {
                                     href = Some(attr.unescape_value()?.into_owned());
                                 }
-                                if attr.key == QName(b"media-type") {
+                                if attr.key == QName("media-type") {
                                     media_type = Some(attr.unescape_value()?.into_owned());
                                 }
                             }
@@ -552,11 +552,11 @@ fn extract_epub(path: &Path) -> Result<(Option<String>, ExtractionStatus)> {
                                     item_hrefs.push(full);
                                 }
                             }
-                        } else if e.name() == QName(b"spine") {
+                        } else if e.name() == QName("spine") {
                             in_spine = true;
-                        } else if in_spine && e.name() == QName(b"itemref") {
+                        } else if in_spine && e.name() == QName("itemref") {
                             for attr in e.attributes().flatten() {
-                                if attr.key == QName(b"idref") {
+                                if attr.key == QName("idref") {
                                     let idref = attr.unescape_value()?.into_owned();
                                     let _ = idref;
                                 }
@@ -564,7 +564,7 @@ fn extract_epub(path: &Path) -> Result<(Option<String>, ExtractionStatus)> {
                         }
                     }
                     Ok(Event::End(e)) => {
-                        if e.name() == QName(b"spine") {
+                        if e.name() == QName("spine") {
                             in_spine = false;
                         }
                     }
@@ -703,7 +703,7 @@ fn strip_rtf(source: &str) -> String {
 }
 
 /// Extract text from a simple XML document by concatenating text inside `tag`.
-fn extract_text_from_xml(xml: &str, tag: &[u8]) -> String {
+fn extract_text_from_xml(xml: &str, tag: &str) -> String {
     let mut text = String::new();
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
@@ -717,7 +717,7 @@ fn extract_text_from_xml(xml: &str, tag: &[u8]) -> String {
             }
             Ok(Event::Text(e)) => {
                 if in_tag {
-                    text.push_str(&String::from_utf8_lossy(e.as_ref()));
+                    text.push_str(e.as_ref());
                 }
             }
             Ok(Event::End(e)) => {
@@ -1238,7 +1238,7 @@ mod tests {
     #[test]
     fn test_extract_text_from_xml() {
         let xml = r#"<root><t>one</t><t>two</t></root>"#;
-        assert_eq!(extract_text_from_xml(xml, b"t").trim(), "one two");
+        assert_eq!(extract_text_from_xml(xml, "t").trim(), "one two");
     }
 
     #[test]

@@ -186,7 +186,7 @@ pub fn load_room_config(project_dir: &Path) -> Result<Option<RoomConfig>> {
             serde_json::from_str(&content)
                 .with_context(|| format!("Invalid JSON room config: {}", path.display()))?
         } else {
-            serde_yaml::from_str(&content)
+            serde_yml::from_str(&content)
                 .with_context(|| format!("Invalid YAML room config: {}", path.display()))?
         };
 
@@ -408,8 +408,8 @@ pub fn save_config(
         rooms: rooms.to_vec(),
     };
     let path = project_dir.join("mempalace.yaml");
-    let content = serde_yaml::to_string(&config)
-        .with_context(|| "Failed to serialize room config to YAML")?;
+    let content =
+        serde_yml::to_string(&config).with_context(|| "Failed to serialize room config to YAML")?;
     fs::write(&path, content)
         .with_context(|| format!("Failed to write room config: {}", path.display()))?;
     Ok(path)

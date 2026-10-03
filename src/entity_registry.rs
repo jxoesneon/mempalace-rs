@@ -294,10 +294,8 @@ impl EntityRegistry {
                     }
                 }
             }
-            EntityType::Project => {
-                if !self.data.projects.contains(&entity.name) {
-                    self.data.projects.push(entity.name.clone());
-                }
+            EntityType::Project if !self.data.projects.contains(&entity.name) => {
+                self.data.projects.push(entity.name.clone());
             }
             _ => {}
         }
