@@ -1,12 +1,24 @@
 use anyhow::{anyhow, Result};
-use serde::{Deserialize, Serialize};
+use rmcp::model::{
+    CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
+    ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig, Tool,
+};
+use rmcp::model::{RequestId, ServerJsonRpcMessage};
+use rmcp::service::{RequestContext, RxJsonRpcMessage, TxJsonRpcMessage};
+use rmcp::transport::async_rw::AsyncRwTransport;
+use rmcp::transport::Transport;
+use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, ServiceExt};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
-use std::sync::Arc;
-use tokio::io::{stdin, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use std::future::Future;
+use std::io;
+use std::pin::Pin;
+use std::sync::{Arc, LazyLock};
+use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::{mpsc, Mutex, Semaphore};
-use tracing::{error, span, warn, Level};
+use tracing::{error, span, warn, Instrument, Level};
 
 use crate::config::MempalaceConfig;
 use crate::dialect::Dialect;
@@ -15,32 +27,6 @@ use crate::knowledge_graph::KnowledgeGraph;
 use crate::palace_graph::PalaceGraph;
 use crate::searcher::Searcher;
 use crate::vector_storage::VectorStorage;
-
-#[derive(Debug, Serialize, Deserialize)]
-struct JsonRpcRequest {
-    jsonrpc: String,
-    method: String,
-    params: Option<Value>,
-    id: Option<Value>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct JsonRpcResponse {
-    jsonrpc: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<JsonRpcError>,
-    id: Option<Value>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct JsonRpcError {
-    code: i32,
-    message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    data: Option<Value>,
-}
 
 pub struct McpServer {
     config: MempalaceConfig,
@@ -147,395 +133,272 @@ impl McpServer {
         }
     }
 
+    /// Serves MCP over stdio until the client disconnects.
+    ///
+    /// rmcp negotiates the lifecycle per client: pre-2026-07-28 clients open
+    /// with the `initialize` handshake (falling back to the newest handshake
+    /// revision if they ask for one we cannot serve that way), while
+    /// 2026-07-28 clients skip it and carry their version in per-request
+    /// `_meta`.
     pub async fn run(self) -> Result<()> {
-        let server = Arc::new(self);
-        let mut reader = BufReader::new(stdin());
-        let mut line = String::new();
-        const MAX_LINE_LENGTH: usize = 10 * 1024 * 1024; // 10MB limit
-
-        // Output channel to serialize writes to stdout
-        let (tx, mut rx) = mpsc::channel::<String>(100);
-
-        // Dedicated stdout writer task
-        tokio::spawn(async move {
-            let mut writer = tokio::io::BufWriter::new(tokio::io::stdout());
-            while let Some(msg) = rx.recv().await {
-                if let Err(e) = writer.write_all(msg.as_bytes()).await {
-                    error!("Stdout writer failed: {}", e);
-                    break;
-                }
-                let _ = writer.flush().await;
-            }
-        });
-
-        loop {
-            line.clear();
-            let mut limited_reader = (&mut reader).take(MAX_LINE_LENGTH as u64);
-            let bytes_read = limited_reader.read_line(&mut line).await?;
-
-            if bytes_read == 0 {
-                break;
-            }
-
-            if bytes_read >= MAX_LINE_LENGTH && !line.ends_with('\n') {
-                let resp = JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    result: None,
-                    error: Some(JsonRpcError {
-                        code: -32600,
-                        message: "Request too large or missing newline".to_string(),
-                        data: None,
-                    }),
-                    id: None,
-                };
-                let resp_json = serde_json::to_string(&resp)? + "\n";
-                let _ = tx.send(resp_json).await;
-
-                let mut dummy = Vec::new();
-                let _ = reader.read_until(b'\n', &mut dummy).await?;
-                continue;
-            }
-
-            let req: JsonRpcRequest = match serde_json::from_str(&line) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
-
-            if req.id.is_none() || req.method.starts_with("notifications/") {
-                continue;
-            }
-
-            // Spawn concurrent handler with backpressure
-            let server_clone = Arc::clone(&server);
-            let tx_clone = tx.clone();
-            tokio::spawn(async move {
-                let _permit = server_clone.semaphore.acquire().await.ok();
-                let span = span!(Level::INFO, "mcp_request", method = %req.method);
-                let _enter = span.enter();
-
-                let resp = server_clone.handle_request(req).await;
-                if let Ok(resp_json) = serde_json::to_string(&resp) {
-                    let _ = tx_clone.send(resp_json + "\n").await;
-                }
-            });
-        }
-
+        let (stdin, stdout) = rmcp::transport::stdio();
+        let service = McpHandler(Arc::new(self))
+            .serve(line_limited_transport(stdin, stdout, MAX_LINE_LENGTH))
+            .await?;
+        service.waiting().await?;
         Ok(())
     }
 
-    async fn handle_request(self: &Arc<Self>, req: JsonRpcRequest) -> JsonRpcResponse {
-        let method = req.method.clone();
+    /// The MCP tool catalogue, built once from its JSON definitions.
+    fn tools() -> &'static [Tool] {
+        &TOOLS
+    }
+}
 
-        // Determine if this is a "heavy" tool call (embedding, etc)
-        let is_heavy = match method.as_str() {
-            "tools/call" => {
-                if let Some(params) = &req.params {
-                    let name = params["name"].as_str().unwrap_or("");
-                    matches!(
-                        name,
-                        "mempalace_add_drawer"
-                            | "mempalace_search"
-                            | "mempalace_check_duplicate"
-                            | "mempalace_prune"
-                    )
-                } else {
-                    false
+static TOOLS: LazyLock<Vec<Tool>> = LazyLock::new(|| {
+    serde_json::from_value(json!([
+        {
+            "name": "mempalace_status",
+            "description": "Get system status overview. Returns counts of all memory drawers (stored items), wings (top-level categories), rooms (sub-categories), the AAAK compression protocol version, and storage statistics. Use this to understand the current memory palace structure and storage utilization.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "mempalace_list_wings",
+            "description": "List all wings (top-level memory categories) with their drawer counts. Wings are the highest level of organization in the memory palace (e.g., 'rust_patterns', 'project_ideas'). Use this to discover available memory categories before searching or storing.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "mempalace_list_rooms",
+            "description": "List all rooms (sub-categories) within a specific wing. Rooms organize memories within a wing (e.g., wing 'rust_patterns' might have rooms 'async', 'macros', 'lifetimes'). Use this to narrow down where to store or retrieve specific memories.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "wing": { "type": "string" }
+                },
+                "required": ["wing"]
+            }
+        },
+        {
+            "name": "mempalace_get_taxonomy",
+            "description": "Get complete hierarchical taxonomy: wings -> rooms -> drawer counts. Returns the full tree structure showing how all memories are organized. Use this for navigation and understanding the complete memory organization structure.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "mempalace_search",
+            "description": "Search memories using semantic/vector similarity. Provide a natural language query to find semantically related content across all drawers. Results ranked by relevance. Optional: filter by wing and room. Use for fuzzy matching when exact keywords are unknown.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" },
+                    "wing": { "type": "string" },
+                    "room": { "type": "string" },
+                    "n_results": { "type": "integer", "default": 5 }
+                },
+                "required": ["query"]
+            }
+        },
+        {
+            "name": "mempalace_check_duplicate",
+            "description": "Check if similar content already exists before storing. Provide text to compare against all memories. Returns similarity score (0.0-1.0) to nearest match. Use threshold parameter (default 0.9) to detect duplicates. Essential for preventing redundant storage.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string" },
+                    "threshold": { "type": "number", "default": 0.9 }
+                },
+                "required": ["text"]
+            }
+        },
+        {
+            "name": "mempalace_get_aaak_spec",
+            "description": "Get the AAAK (Agent-to-Agent Knowledge) protocol specification. Returns the compression format and dialect rules used for encoding/decoding agent communications. Use this to understand the compression scheme for inter-agent knowledge transfer.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "mempalace_traverse_graph",
+            "description": "Traverse the memory palace graph starting from a specific room. Walks through room connections following the palace architecture. Use max_hops to limit traversal depth. Useful for exploring related memory clusters and spatial relationships.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "start_room": { "type": "string" },
+                    "max_hops": { "type": "integer", "default": 2 }
+                },
+                "required": ["start_room"]
+            }
+        },
+        {
+            "name": "mempalace_find_tunnels",
+            "description": "Find connection tunnels (bridges) between otherwise disconnected memory rooms. Identifies paths that link different wings through shared concepts. Useful for discovering non-obvious relationships and navigation shortcuts across the memory palace.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "mempalace_graph_stats",
+            "description": "Get statistics about the palace graph structure: total nodes (rooms), edges (connections), density, and clustering metrics. Use this to understand the overall connectivity and organization health of the memory graph.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "mempalace_add_drawer",
+            "description": "Store verbatim (exact) content in a memory drawer. Saves the complete text as-is without compression. Optionally specify wing and room for organization. If omitted, stores in default location. Required: content (the text to store). Use for preserving exact code, documentation, or facts.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "content": { "type": "string" },
+                    "wing": { "type": "string" },
+                    "room": { "type": "string" }
+                },
+                "required": ["content"]
+            }
+        },
+        {
+            "name": "mempalace_delete_drawer",
+            "description": "Permanently delete a memory drawer by its ID. This removes the stored content from the system. Required: memory_id (integer ID of the drawer to delete). Use when content is outdated, erroneous, or needs to be purged. Irreversible operation.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "memory_id": { "type": "integer" }
+                },
+                "required": ["memory_id"]
+            }
+        },
+        {
+            "name": "mempalace_kg_query",
+            "description": "Query the Knowledge Graph for relationships involving a specific entity. Retrieves triples (subject-predicate-object) connected to the entity. Direction parameter controls: 'incoming' (what points to entity), 'outgoing' (what entity points to), or 'both' (default). Use to explore relational knowledge and dependencies.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "entity": { "type": "string" },
+                    "direction": { "type": "string", "enum": ["incoming", "outgoing", "both"], "default": "both" }
+                },
+                "required": ["entity"]
+            }
+        },
+        {
+            "name": "mempalace_kg_add",
+            "description": "Assert a new fact into the Knowledge Graph as a semantic triple: Subject -> Predicate -> Object. Creates a permanent relational link (e.g., 'Dependency X' 'breaks' 'Component Y'). Use to build logical chains, track dependencies, and encode structured knowledge beyond raw text.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject": { "type": "string" },
+                    "predicate": { "type": "string" },
+                    "object": { "type": "string" }
+                },
+                "required": ["subject", "predicate", "object"]
+            }
+        },
+        {
+            "name": "mempalace_kg_invalidate",
+            "description": "Mark a Knowledge Graph triple as invalid/deprecated without deleting it. Preserves the assertion for audit but flags it as no longer current. Use when facts change or assertions become outdated but historical record is needed. Soft-delete for knowledge triples.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "subject": { "type": "string" },
+                    "predicate": { "type": "string" },
+                    "object": { "type": "string" }
+                },
+                "required": ["subject", "predicate", "object"]
+            }
+        },
+        {
+            "name": "mempalace_kg_timeline",
+            "description": "Get chronological history of all Knowledge Graph assertions involving an entity. Shows when triples were added and their validity status. Use to track how knowledge about an entity evolved over time and when specific relationships were established.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "entity": { "type": "string" }
+                },
+                "required": ["entity"]
+            }
+        },
+        {
+            "name": "mempalace_kg_stats",
+            "description": "Get Knowledge Graph statistics: total triples, entities, predicates, and temporal distribution. Use this to understand the scale and structure of the relational knowledge base, distinct from the semantic memory drawers.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "mempalace_diary_write",
+            "description": "Write an entry to an agent's chronological journal (diary). Records timestamped sequential logs for a specific agent identity. Use for tracking agent actions, decisions, reflections, or session progress. Creates temporal audit trail of agent activity.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": { "type": "string" },
+                    "content": { "type": "string" }
+                },
+                "required": ["agent", "content"]
+            }
+        },
+        {
+            "name": "mempalace_diary_read",
+            "description": "Read recent entries from an agent's chronological journal. Returns last N entries (default 5) in reverse chronological order. Use to recall recent agent activities, decisions, or context from previous sessions. Essential for maintaining continuity across invocations.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "agent": { "type": "string" },
+                    "last_n": { "type": "integer", "default": 5 }
+                },
+                "required": ["agent"]
+            }
+        },
+        {
+            "name": "mempalace_prune",
+            "description": "Semantic deduplication. Finds and merges similar memories.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "threshold": { "type": "number", "default": 0.85 },
+                    "dry_run": { "type": "boolean", "default": true },
+                    "wing": { "type": "string" }
                 }
             }
-            _ => false,
-        };
-
-        let result = if is_heavy {
-            // Force heavy calls to blocking threads to avoid starving the main runtime
-            let self_clone = Arc::clone(self);
-            let req_params = req.params.clone();
-            tokio::task::spawn_blocking(move || {
-                let rt = tokio::runtime::Handle::current();
-                rt.block_on(self_clone.handle_tools_call(req_params))
-            })
-            .await
-            .unwrap_or_else(|e| Err(anyhow!("Blocking task panicked: {}", e)))
-        } else {
-            match method.as_str() {
-                "initialize" => self.handle_initialize(req.params),
-                "tools/list" => self.handle_tools_list(),
-                "tools/call" => self.handle_tools_call(req.params).await,
-                "resources/list" => Ok(json!({ "resources": [] })),
-                "prompts/list" => Ok(json!({ "prompts": [] })),
-                _ => Ok(json!({})),
-            }
-        };
-
-        match result {
-            Ok(res) => JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                result: Some(res),
-                error: None,
-                id: req.id,
-            },
-            Err(e) => {
-                error!("Tool error ({}): {}", method, e);
-                JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    result: None,
-                    error: Some(JsonRpcError {
-                        code: -32603,
-                        message: format!("Internal server error: {}", e),
-                        data: None,
-                    }),
-                    id: req.id,
-                }
+        },
+        {
+            "name": "mempalace_checkpoint",
+            "description": "Save a whole session in one call: semantic-dedups each item, files non-duplicates as drawers, then writes one diary entry.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "wing": { "type": "string" },
+                                "room": { "type": "string" },
+                                "content": { "type": "string" }
+                            },
+                            "required": ["wing", "room", "content"]
+                        }
+                    },
+                    "diary": { "type": "object" },
+                    "dedup_threshold": { "type": "number", "default": 0.9 }
+                },
+                "required": ["items"]
             }
         }
-    }
+    ]))
+    .expect("built-in tool definitions are valid MCP tools")
+});
 
-    fn handle_initialize(&self, _params: Option<Value>) -> Result<Value> {
-        Ok(json!({
-            "protocolVersion": "2024-11-05",
-            "capabilities": {
-                "tools": {
-                    "listChanged": true
-                }
-            },
-            "serverInfo": {
-                "name": "mempalace-rs",
-                "version": env!("CARGO_PKG_VERSION")
-            }
-        }))
-    }
-
-    fn handle_tools_list(&self) -> Result<Value> {
-        Ok(json!({
-            "tools": [
-                {
-                    "name": "mempalace_status",
-                    "description": "Get system status overview. Returns counts of all memory drawers (stored items), wings (top-level categories), rooms (sub-categories), the AAAK compression protocol version, and storage statistics. Use this to understand the current memory palace structure and storage utilization.",
-                    "inputSchema": { "type": "object", "properties": {} }
-                },
-                {
-                    "name": "mempalace_list_wings",
-                    "description": "List all wings (top-level memory categories) with their drawer counts. Wings are the highest level of organization in the memory palace (e.g., 'rust_patterns', 'project_ideas'). Use this to discover available memory categories before searching or storing.",
-                    "inputSchema": { "type": "object", "properties": {} }
-                },
-                {
-                    "name": "mempalace_list_rooms",
-                    "description": "List all rooms (sub-categories) within a specific wing. Rooms organize memories within a wing (e.g., wing 'rust_patterns' might have rooms 'async', 'macros', 'lifetimes'). Use this to narrow down where to store or retrieve specific memories.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "wing": { "type": "string" }
-                        },
-                        "required": ["wing"]
-                    }
-                },
-                {
-                    "name": "mempalace_get_taxonomy",
-                    "description": "Get complete hierarchical taxonomy: wings -> rooms -> drawer counts. Returns the full tree structure showing how all memories are organized. Use this for navigation and understanding the complete memory organization structure.",
-                    "inputSchema": { "type": "object", "properties": {} }
-                },
-                {
-                    "name": "mempalace_search",
-                    "description": "Search memories using semantic/vector similarity. Provide a natural language query to find semantically related content across all drawers. Results ranked by relevance. Optional: filter by wing and room. Use for fuzzy matching when exact keywords are unknown.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "query": { "type": "string" },
-                            "wing": { "type": "string" },
-                            "room": { "type": "string" },
-                            "n_results": { "type": "integer", "default": 5 }
-                        },
-                        "required": ["query"]
-                    }
-                },
-                {
-                    "name": "mempalace_check_duplicate",
-                    "description": "Check if similar content already exists before storing. Provide text to compare against all memories. Returns similarity score (0.0-1.0) to nearest match. Use threshold parameter (default 0.9) to detect duplicates. Essential for preventing redundant storage.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "text": { "type": "string" },
-                            "threshold": { "type": "number", "default": 0.9 }
-                        },
-                        "required": ["text"]
-                    }
-                },
-                {
-                    "name": "mempalace_get_aaak_spec",
-                    "description": "Get the AAAK (Agent-to-Agent Knowledge) protocol specification. Returns the compression format and dialect rules used for encoding/decoding agent communications. Use this to understand the compression scheme for inter-agent knowledge transfer.",
-                    "inputSchema": { "type": "object", "properties": {} }
-                },
-                {
-                    "name": "mempalace_traverse_graph",
-                    "description": "Traverse the memory palace graph starting from a specific room. Walks through room connections following the palace architecture. Use max_hops to limit traversal depth. Useful for exploring related memory clusters and spatial relationships.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "start_room": { "type": "string" },
-                            "max_hops": { "type": "integer", "default": 2 }
-                        },
-                        "required": ["start_room"]
-                    }
-                },
-                {
-                    "name": "mempalace_find_tunnels",
-                    "description": "Find connection tunnels (bridges) between otherwise disconnected memory rooms. Identifies paths that link different wings through shared concepts. Useful for discovering non-obvious relationships and navigation shortcuts across the memory palace.",
-                    "inputSchema": { "type": "object", "properties": {} }
-                },
-                {
-                    "name": "mempalace_graph_stats",
-                    "description": "Get statistics about the palace graph structure: total nodes (rooms), edges (connections), density, and clustering metrics. Use this to understand the overall connectivity and organization health of the memory graph.",
-                    "inputSchema": { "type": "object", "properties": {} }
-                },
-                {
-                    "name": "mempalace_add_drawer",
-                    "description": "Store verbatim (exact) content in a memory drawer. Saves the complete text as-is without compression. Optionally specify wing and room for organization. If omitted, stores in default location. Required: content (the text to store). Use for preserving exact code, documentation, or facts.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "content": { "type": "string" },
-                            "wing": { "type": "string" },
-                            "room": { "type": "string" }
-                        },
-                        "required": ["content"]
-                    }
-                },
-                {
-                    "name": "mempalace_delete_drawer",
-                    "description": "Permanently delete a memory drawer by its ID. This removes the stored content from the system. Required: memory_id (integer ID of the drawer to delete). Use when content is outdated, erroneous, or needs to be purged. Irreversible operation.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "memory_id": { "type": "integer" }
-                        },
-                        "required": ["memory_id"]
-                    }
-                },
-                {
-                    "name": "mempalace_kg_query",
-                    "description": "Query the Knowledge Graph for relationships involving a specific entity. Retrieves triples (subject-predicate-object) connected to the entity. Direction parameter controls: 'incoming' (what points to entity), 'outgoing' (what entity points to), or 'both' (default). Use to explore relational knowledge and dependencies.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "entity": { "type": "string" },
-                            "direction": { "type": "string", "enum": ["incoming", "outgoing", "both"], "default": "both" }
-                        },
-                        "required": ["entity"]
-                    }
-                },
-                {
-                    "name": "mempalace_kg_add",
-                    "description": "Assert a new fact into the Knowledge Graph as a semantic triple: Subject -> Predicate -> Object. Creates a permanent relational link (e.g., 'Dependency X' 'breaks' 'Component Y'). Use to build logical chains, track dependencies, and encode structured knowledge beyond raw text.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "subject": { "type": "string" },
-                            "predicate": { "type": "string" },
-                            "object": { "type": "string" }
-                        },
-                        "required": ["subject", "predicate", "object"]
-                    }
-                },
-                {
-                    "name": "mempalace_kg_invalidate",
-                    "description": "Mark a Knowledge Graph triple as invalid/deprecated without deleting it. Preserves the assertion for audit but flags it as no longer current. Use when facts change or assertions become outdated but historical record is needed. Soft-delete for knowledge triples.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "subject": { "type": "string" },
-                            "predicate": { "type": "string" },
-                            "object": { "type": "string" }
-                        },
-                        "required": ["subject", "predicate", "object"]
-                    }
-                },
-                {
-                    "name": "mempalace_kg_timeline",
-                    "description": "Get chronological history of all Knowledge Graph assertions involving an entity. Shows when triples were added and their validity status. Use to track how knowledge about an entity evolved over time and when specific relationships were established.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "entity": { "type": "string" }
-                        },
-                        "required": ["entity"]
-                    }
-                },
-                {
-                    "name": "mempalace_kg_stats",
-                    "description": "Get Knowledge Graph statistics: total triples, entities, predicates, and temporal distribution. Use this to understand the scale and structure of the relational knowledge base, distinct from the semantic memory drawers.",
-                    "inputSchema": { "type": "object", "properties": {} }
-                },
-                {
-                    "name": "mempalace_diary_write",
-                    "description": "Write an entry to an agent's chronological journal (diary). Records timestamped sequential logs for a specific agent identity. Use for tracking agent actions, decisions, reflections, or session progress. Creates temporal audit trail of agent activity.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "agent": { "type": "string" },
-                            "content": { "type": "string" }
-                        },
-                        "required": ["agent", "content"]
-                    }
-                },
-                {
-                    "name": "mempalace_diary_read",
-                    "description": "Read recent entries from an agent's chronological journal. Returns last N entries (default 5) in reverse chronological order. Use to recall recent agent activities, decisions, or context from previous sessions. Essential for maintaining continuity across invocations.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "agent": { "type": "string" },
-                            "last_n": { "type": "integer", "default": 5 }
-                        },
-                        "required": ["agent"]
-                    }
-                },
-                {
-                    "name": "mempalace_prune",
-                    "description": "Semantic deduplication. Finds and merges similar memories.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "threshold": { "type": "number", "default": 0.85 },
-                            "dry_run": { "type": "boolean", "default": true },
-                            "wing": { "type": "string" }
-                        }
-                    }
-                },
-                {
-                    "name": "mempalace_checkpoint",
-                    "description": "Save a whole session in one call: semantic-dedups each item, files non-duplicates as drawers, then writes one diary entry.",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "items": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "wing": { "type": "string" },
-                                        "room": { "type": "string" },
-                                        "content": { "type": "string" }
-                                    },
-                                    "required": ["wing", "room", "content"]
-                                }
-                            },
-                            "diary": { "type": "object" },
-                            "dedup_threshold": { "type": "number", "default": 0.9 }
-                        },
-                        "required": ["items"]
-                    }
-                }
-            ]
-        }))
-    }
-
+impl McpServer {
     pub async fn handle_tools_call(&self, params: Option<Value>) -> Result<Value> {
         let params = params.ok_or_else(|| anyhow!("Missing params"))?;
         let name = params["name"]
             .as_str()
             .ok_or_else(|| anyhow!("Missing tool name"))?;
         let args = params.get("arguments").unwrap_or(&Value::Null);
+        let tool_result = self.dispatch_tool(name, args).await?;
 
-        let tool_result = match name {
+        // Wrap in MCP-compliant content format
+        Ok(json!({
+            "content": [{
+                "type": "text",
+                "text": serde_json::to_string(&tool_result)?
+            }]
+        }))
+    }
+
+    /// Runs the named tool and returns its raw (unwrapped) JSON result.
+    async fn dispatch_tool(&self, name: &str, args: &Value) -> Result<Value> {
+        match name {
             "mempalace_status" => self.mempalace_status().await,
             "mempalace_list_wings" => self.mempalace_list_wings().await,
             "mempalace_list_rooms" => self.mempalace_list_rooms(args).await,
@@ -558,15 +421,7 @@ impl McpServer {
             "mempalace_prune" => self.mempalace_prune(args).await,
             "mempalace_checkpoint" => self.mempalace_checkpoint(args).await,
             _ => Err(anyhow!("Unknown tool: {}", name)),
-        }?;
-
-        // Wrap in MCP-compliant content format
-        Ok(json!({
-            "content": [{
-                "type": "text",
-                "text": serde_json::to_string(&tool_result)?
-            }]
-        }))
+        }
     }
 
     pub async fn mempalace_status(&self) -> Result<Value> {
@@ -1028,6 +883,281 @@ pub async fn run_mcp_server() -> Result<()> {
     server.run().await
 }
 
+/// Upper bound on a single newline-delimited message from the client.
+const MAX_LINE_LENGTH: usize = 10 * 1024 * 1024; // 10MB limit
+
+/// Tools that embed or scan the vector store ("heavy" calls).
+fn is_heavy(name: &str) -> bool {
+    matches!(
+        name,
+        "mempalace_add_drawer"
+            | "mempalace_search"
+            | "mempalace_check_duplicate"
+            | "mempalace_prune"
+    )
+}
+
+/// rmcp adapter for [`McpServer`]. Holding it in an `Arc` lets heavy tool
+/// calls move onto blocking threads.
+#[derive(Clone)]
+struct McpHandler(Arc<McpServer>);
+
+impl ServerHandler for McpHandler {
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_server_info(
+            Implementation::new("mempalace-rs", env!("CARGO_PKG_VERSION")),
+        )
+    }
+
+    async fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, McpError> {
+        Ok(ListToolsResult::with_all_items(McpServer::tools().to_vec()))
+    }
+
+    fn get_tool(&self, name: &str) -> Option<Tool> {
+        McpServer::tools()
+            .iter()
+            .find(|tool| tool.name == name)
+            .cloned()
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<CallToolResponse, McpError> {
+        let name = request.name.to_string();
+        if self.get_tool(&name).is_none() {
+            return Err(McpError::invalid_params(
+                format!("Unknown tool: {}", name),
+                None,
+            ));
+        }
+        let args = request.arguments.map(Value::Object).unwrap_or(Value::Null);
+        let server = Arc::clone(&self.0);
+        let span = span!(Level::INFO, "mcp_request", tool = %name);
+
+        let result = async {
+            // Round 3 Fix: backpressure on concurrent tool calls
+            let _permit = server.semaphore.acquire().await.ok();
+            if is_heavy(&name) {
+                // Force heavy calls to blocking threads to avoid starving the main runtime
+                let server = Arc::clone(&server);
+                let name = name.clone();
+                tokio::task::spawn_blocking(move || {
+                    let rt = tokio::runtime::Handle::current();
+                    rt.block_on(server.dispatch_tool(&name, &args))
+                })
+                .await
+                .unwrap_or_else(|e| Err(anyhow!("Blocking task panicked: {}", e)))
+            } else {
+                server.dispatch_tool(&name, &args).await
+            }
+        }
+        .instrument(span)
+        .await;
+
+        // Tool failures go back as `isError` results so the model can see
+        // them; only protocol problems (e.g. an unknown tool) are JSON-RPC errors.
+        let result = match result {
+            Ok(value) => {
+                let text = serde_json::to_string(&value)
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                CallToolResult::success(vec![ContentBlock::text(text)])
+            }
+            Err(e) => {
+                error!("Tool error ({}): {}", name, e);
+                CallToolResult::error(vec![ContentBlock::text(e.to_string())])
+            }
+        };
+        Ok(result.into())
+    }
+}
+
+/// How much of each line is kept for recovering the `id` of an oversized request.
+const ID_SALVAGE_PREFIX: usize = 64 * 1024;
+
+/// Builds the server's transport over `read`/`write`, answering any message
+/// longer than `max_line` bytes with a JSON-RPC Invalid Request error.
+fn line_limited_transport<R, W>(read: R, write: W, max_line: usize) -> LineLimitedTransport<R, W>
+where
+    R: AsyncRead + Send + Unpin + 'static,
+    W: AsyncWrite + Send + Unpin + 'static,
+{
+    let (oversized_tx, oversized) = mpsc::unbounded_channel();
+    let reader = LineLimitedReader::new(read, max_line, oversized_tx);
+    LineLimitedTransport {
+        inner: AsyncRwTransport::new_server(reader, write),
+        oversized,
+        max_line,
+    }
+}
+
+/// rmcp's stdio transport plus replies to the oversized lines that
+/// [`LineLimitedReader`] drops, so the session survives them and the client's
+/// pending request fails promptly instead of hanging.
+struct LineLimitedTransport<R: AsyncRead + Unpin, W: AsyncWrite> {
+    inner: AsyncRwTransport<RoleServer, LineLimitedReader<R>, W>,
+    /// The salvaged `id` (if any) of each dropped line.
+    oversized: mpsc::UnboundedReceiver<Option<RequestId>>,
+    max_line: usize,
+}
+
+impl<R, W> Transport<RoleServer> for LineLimitedTransport<R, W>
+where
+    R: AsyncRead + Send + Unpin + 'static,
+    W: AsyncWrite + Send + Unpin + 'static,
+{
+    type Error = io::Error;
+
+    fn send(
+        &mut self,
+        item: TxJsonRpcMessage<RoleServer>,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'static {
+        self.inner.send(item)
+    }
+
+    async fn receive(&mut self) -> Option<RxJsonRpcMessage<RoleServer>> {
+        loop {
+            // `AsyncRwTransport::receive` is cancellation-safe: a partly read
+            // line is kept for the next call.
+            tokio::select! {
+                Some(id) = self.oversized.recv() => {
+                    warn!("Rejected an MCP message over {} bytes", self.max_line);
+                    let error = McpError::invalid_request(
+                        format!("Request too large: messages are limited to {} bytes", self.max_line),
+                        None,
+                    );
+                    if self.inner.send(ServerJsonRpcMessage::error(error, id)).await.is_err() {
+                        return None;
+                    }
+                }
+                message = self.inner.receive() => return message,
+            }
+        }
+    }
+
+    async fn close(&mut self) -> Result<(), Self::Error> {
+        self.inner.close().await
+    }
+}
+
+/// Drops any line longer than `max` bytes before it reaches rmcp.
+///
+/// rmcp's stdio transport buffers whole lines with no size cap. Past the cap,
+/// this stops passing bytes through and replaces the first excess byte with a
+/// NUL, so rmcp sees a capped, unparsable line and ignores it. When the line's
+/// newline arrives, the request `id` salvaged from its start is sent on
+/// `oversized` for [`LineLimitedTransport`] to answer.
+struct LineLimitedReader<R> {
+    inner: R,
+    max: usize,
+    since_newline: usize,
+    /// The start of the current line, for [`salvage_request_id`].
+    prefix: Vec<u8>,
+    discarding: bool,
+    oversized: mpsc::UnboundedSender<Option<RequestId>>,
+}
+
+impl<R> LineLimitedReader<R> {
+    fn new(inner: R, max: usize, oversized: mpsc::UnboundedSender<Option<RequestId>>) -> Self {
+        Self {
+            inner,
+            max,
+            since_newline: 0,
+            prefix: Vec::new(),
+            discarding: false,
+            oversized,
+        }
+    }
+}
+
+impl<R: AsyncRead + Unpin> AsyncRead for LineLimitedReader<R> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let this = self.get_mut();
+        let start = buf.filled().len();
+        loop {
+            std::task::ready!(Pin::new(&mut this.inner).poll_read(cx, buf))?;
+            let end = buf.filled().len();
+            if end == start {
+                return Poll::Ready(Ok(())); // EOF
+            }
+
+            // Compact the bytes just read in place, dropping discarded ones.
+            let filled = buf.filled_mut();
+            let mut kept = start;
+            for i in start..end {
+                let byte = filled[i];
+                if byte == b'\n' {
+                    if this.discarding {
+                        this.discarding = false;
+                        let _ = this.oversized.send(salvage_request_id(&this.prefix));
+                    }
+                    this.since_newline = 0;
+                    this.prefix.clear();
+                    filled[kept] = byte;
+                    kept += 1;
+                } else if !this.discarding {
+                    this.since_newline += 1;
+                    if this.since_newline > this.max {
+                        this.discarding = true;
+                        filled[kept] = 0;
+                    } else {
+                        if this.prefix.len() < ID_SALVAGE_PREFIX {
+                            this.prefix.push(byte);
+                        }
+                        filled[kept] = byte;
+                    }
+                    kept += 1;
+                }
+            }
+            buf.set_filled(kept);
+            // Reporting zero bytes would read as EOF, so keep going until
+            // something survives.
+            if kept > start {
+                return Poll::Ready(Ok(()));
+            }
+        }
+    }
+}
+
+/// Recovers the top-level `"id"` from the start of a JSON-RPC message that may
+/// be cut off, so an error about it can still be matched to the request.
+fn salvage_request_id(prefix: &[u8]) -> Option<RequestId> {
+    fn skip_ws(rest: &[u8]) -> &[u8] {
+        let n = rest
+            .iter()
+            .take_while(|byte| byte.is_ascii_whitespace())
+            .count();
+        &rest[n..]
+    }
+    fn next_value<T: serde::de::DeserializeOwned>(rest: &mut &[u8]) -> Option<T> {
+        let input: &[u8] = rest;
+        let mut values = serde_json::Deserializer::from_slice(input).into_iter::<T>();
+        let value = values.next()?.ok()?;
+        *rest = &input[values.byte_offset()..];
+        Some(value)
+    }
+
+    let mut rest = skip_ws(prefix).strip_prefix(b"{")?;
+    loop {
+        let key: String = next_value(&mut rest)?;
+        rest = skip_ws(rest).strip_prefix(b":")?;
+        if key == "id" {
+            return next_value(&mut rest);
+        }
+        next_value::<serde::de::IgnoredAny>(&mut rest)?;
+        rest = skip_ws(rest).strip_prefix(b",")?;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1038,57 +1168,251 @@ mod tests {
         (config, temp_dir)
     }
 
-    fn make_request(method: &str, params: Option<Value>, id: Option<Value>) -> JsonRpcRequest {
-        JsonRpcRequest {
-            jsonrpc: "2.0".to_string(),
-            method: method.to_string(),
-            params,
-            id,
+    /// A raw newline-delimited JSON-RPC client wired to a served [`McpHandler`].
+    struct WireClient {
+        reader: tokio::io::BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+        writer: tokio::io::WriteHalf<tokio::io::DuplexStream>,
+        _palace: tempfile::TempDir,
+    }
+
+    impl WireClient {
+        fn start() -> Self {
+            Self::start_with_line_limit(MAX_LINE_LENGTH)
+        }
+
+        fn start_with_line_limit(max_line: usize) -> Self {
+            let (config, palace) = setup_test();
+            let handler = McpHandler(Arc::new(McpServer::new_test(config)));
+            let (server_io, client_io) = tokio::io::duplex(64 * 1024);
+            let (server_read, server_write) = tokio::io::split(server_io);
+            let transport = line_limited_transport(server_read, server_write, max_line);
+            tokio::spawn(async move {
+                if let Ok(service) = handler.serve(transport).await {
+                    let _ = service.waiting().await;
+                }
+            });
+            let (reader, writer) = tokio::io::split(client_io);
+            Self {
+                reader: tokio::io::BufReader::new(reader),
+                writer,
+                _palace: palace,
+            }
+        }
+
+        async fn send(&mut self, message: Value) {
+            use tokio::io::AsyncWriteExt;
+            let line = serde_json::to_string(&message).unwrap() + "\n";
+            self.writer.write_all(line.as_bytes()).await.unwrap();
+        }
+
+        async fn request(&mut self, message: Value) -> Value {
+            use tokio::io::AsyncBufReadExt;
+            self.send(message).await;
+            let mut line = String::new();
+            self.reader.read_line(&mut line).await.unwrap();
+            serde_json::from_str(&line).unwrap()
+        }
+
+        /// Runs the pre-2026-07-28 `initialize` handshake and returns its result.
+        async fn initialize(&mut self, protocol_version: &str) -> Value {
+            let resp = self
+                .request(json!({
+                    "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                    "params": {
+                        "protocolVersion": protocol_version,
+                        "capabilities": {},
+                        "clientInfo": { "name": "legacy-client", "version": "0.0.1" }
+                    }
+                }))
+                .await;
+            self.send(json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }))
+                .await;
+            resp["result"].clone()
         }
     }
 
-    #[tokio::test]
-    async fn test_handle_request_initialize() {
-        let (config, _td) = setup_test();
-        let server = Arc::new(McpServer::new_test(config));
-        let req = make_request("initialize", None, Some(json!(1)));
-        let resp = server.handle_request(req).await;
+    /// Per-request lifecycle metadata a 2026-07-28 client sends instead of `initialize`.
+    fn inline_meta() -> Value {
+        json!({
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientInfo": { "name": "inline-client", "version": "0.0.1" },
+            "io.modelcontextprotocol/clientCapabilities": {}
+        })
+    }
 
-        assert!(resp.error.is_none());
-        let res = resp.result.unwrap();
+    #[tokio::test]
+    async fn legacy_client_handshake_echoes_its_version() {
+        let mut client = WireClient::start();
+        let res = client.initialize("2024-11-05").await;
+
         assert_eq!(res["protocolVersion"], "2024-11-05");
         assert_eq!(res["serverInfo"]["name"], "mempalace-rs");
-    }
+        assert!(res["capabilities"]["tools"].is_object());
 
-    #[tokio::test]
-    async fn test_handle_request_tools_list() {
-        let (config, _td) = setup_test();
-        let server = Arc::new(McpServer::new_test(config));
-        let req = make_request("tools/list", None, Some(json!(2)));
-        let resp = server.handle_request(req).await;
-
-        assert!(resp.error.is_none());
-        let res = resp.result.unwrap();
-        let tools = res["tools"].as_array().unwrap();
+        let resp = client
+            .request(json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
+            .await;
+        let tools = resp["result"]["tools"].as_array().unwrap();
         assert!(tools.len() >= 20);
+        // `resultType` belongs to 2026-07-28 and must not leak to legacy peers.
+        assert!(resp["result"].get("resultType").is_none());
     }
 
     #[tokio::test]
-    async fn test_handle_request_tools_call_content_wrapper() {
-        let (config, _td) = setup_test();
-        let server = Arc::new(McpServer::new_test(config));
-        let req = make_request(
-            "tools/call",
-            Some(json!({ "name": "mempalace_status", "arguments": {} })),
-            Some(json!(3)),
-        );
-        let resp = server.handle_request(req).await;
+    async fn handshake_naming_2026_07_28_falls_back_to_newest_handshake_version() {
+        let mut client = WireClient::start();
+        let res = client.initialize("2026-07-28").await;
+        assert_eq!(res["protocolVersion"], "2025-11-25");
+    }
 
-        assert!(resp.error.is_none());
-        let res = resp.result.unwrap();
-        let content = res["content"].as_array().expect("missing content array");
-        assert!(!content.is_empty());
+    #[tokio::test]
+    async fn legacy_tools_call_wraps_result_in_text_content() {
+        let mut client = WireClient::start();
+        client.initialize("2025-06-18").await;
+
+        let resp = client
+            .request(json!({
+                "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "params": { "name": "mempalace_status", "arguments": {} }
+            }))
+            .await;
+        let content = resp["result"]["content"]
+            .as_array()
+            .expect("missing content array");
         assert_eq!(content[0]["type"], "text");
+        assert_ne!(resp["result"]["isError"], true);
+        let status: Value = serde_json::from_str(content[0]["text"].as_str().unwrap()).unwrap();
+        assert!(status["total_memories"].is_number());
+    }
+
+    #[tokio::test]
+    async fn inline_client_needs_no_handshake() {
+        let mut client = WireClient::start();
+
+        let resp = client
+            .request(json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/list",
+                "params": { "_meta": inline_meta() }
+            }))
+            .await;
+        assert_eq!(resp["result"]["resultType"], "complete");
+        assert!(resp["result"]["tools"].as_array().unwrap().len() >= 20);
+
+        let resp = client
+            .request(json!({
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": { "_meta": inline_meta(), "name": "mempalace_status", "arguments": {} }
+            }))
+            .await;
+        assert_eq!(resp["result"]["content"][0]["type"], "text");
+    }
+
+    #[tokio::test]
+    async fn discover_advertises_legacy_and_current_versions() {
+        let mut client = WireClient::start();
+        let resp = client
+            .request(json!({
+                "jsonrpc": "2.0", "id": 1, "method": "server/discover",
+                "params": { "_meta": inline_meta() }
+            }))
+            .await;
+        let versions = resp["result"]["supportedVersions"].to_string();
+        assert!(versions.contains("2024-11-05"), "{resp}");
+        assert!(versions.contains("2026-07-28"), "{resp}");
+    }
+
+    #[tokio::test]
+    async fn unknown_tool_is_a_protocol_error_and_failing_tool_is_an_error_result() {
+        let mut client = WireClient::start();
+        client.initialize("2025-11-25").await;
+
+        let resp = client
+            .request(json!({
+                "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": { "name": "unknown_tool", "arguments": {} }
+            }))
+            .await;
+        assert_eq!(resp["error"]["code"], -32602);
+
+        let resp = client
+            .request(json!({
+                "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "params": { "name": "mempalace_list_rooms" }
+            }))
+            .await;
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[tokio::test]
+    async fn oversized_request_gets_matching_error_and_session_survives() {
+        let mut client = WireClient::start_with_line_limit(4096);
+        client.initialize("2025-11-25").await;
+
+        let resp = client
+            .request(json!({
+                "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                "params": {
+                    "name": "mempalace_add_drawer",
+                    "arguments": { "content": "x".repeat(10_000) }
+                }
+            }))
+            .await;
+        assert_eq!(resp["id"], 7, "{resp}");
+        assert_eq!(resp["error"]["code"], -32600);
+        assert!(resp["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("too large"));
+
+        let resp = client
+            .request(json!({
+                "jsonrpc": "2.0", "id": 8, "method": "tools/call",
+                "params": { "name": "mempalace_status", "arguments": {} }
+            }))
+            .await;
+        assert_eq!(resp["id"], 8);
+        assert_eq!(resp["result"]["content"][0]["type"], "text");
+    }
+
+    #[tokio::test]
+    async fn line_limited_reader_drops_only_overlong_lines() {
+        use tokio::io::AsyncReadExt;
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let input = &b"abc\n{\"id\":5,\"x\":\"long\"}\ndef\n"[..];
+        let mut reader = LineLimitedReader::new(input, 8, tx);
+        let mut out = Vec::new();
+        reader.read_to_end(&mut out).await.unwrap();
+
+        // The long line is cut at the limit and poisoned with a NUL.
+        assert_eq!(out, b"abc\n{\"id\":5,\0\ndef\n");
+        assert_eq!(rx.try_recv().unwrap(), Some(RequestId::Number(5)));
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn salvage_request_id_reads_the_top_level_id_from_a_truncated_message() {
+        let salvage = |s: &str| salvage_request_id(s.as_bytes());
+
+        assert_eq!(
+            salvage(r#"{"jsonrpc":"2.0","id":42,"method":"tools/call","params":{"argu"#),
+            Some(RequestId::Number(42))
+        );
+        assert_eq!(
+            salvage(r#" { "id" : "req-1" , "method""#),
+            Some(RequestId::String("req-1".into()))
+        );
+        // A nested "id" is not the request's.
+        assert_eq!(
+            salvage(r#"{"params":{"id":1,"s":"}\"id\":9"},"id":2,"#),
+            Some(RequestId::Number(2))
+        );
+        // Cut off before the id, or not JSON at all.
+        assert_eq!(
+            salvage(r#"{"jsonrpc":"2.0","method":"tools/call","params":{"#),
+            None
+        );
+        assert_eq!(salvage("garbage"), None);
     }
 
     #[tokio::test]
@@ -1141,16 +1465,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_request_invalid_json() {
-        let (config, _td) = setup_test();
-        let _server = Arc::new(McpServer::new_test(config));
-
-        // This is a bit tricky since handle_request takes a struct.
-        // We'll test the loop part implicitly or just mock the logic if possible.
-        // For branch coverage, let's test a tool call with missing fields.
-    }
-
-    #[tokio::test]
     async fn test_handle_tools_call_missing_name() {
         let (config, _td) = setup_test();
         let server = McpServer::new_test(config);
@@ -1168,13 +1482,6 @@ mod tests {
         let res = server.handle_tools_call(Some(args)).await;
         assert!(res.is_err());
         assert!(res.unwrap_err().to_string().contains("Unknown tool"));
-    }
-
-    #[tokio::test]
-    async fn test_handle_request_tool_call_missing_params() {
-        let (config, _td) = setup_test();
-        let _server = Arc::new(McpServer::new_test(config));
-        // Need to check handle_request logic for tool call with missing params
     }
 
     #[test]
